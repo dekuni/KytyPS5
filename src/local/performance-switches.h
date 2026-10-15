@@ -3,6 +3,7 @@
 // behaviour unless its environment variable is set; the GPU thread applies them
 // once, before it consumes commands. Values outside a switch's range abort.
 
+#include "causal-probe.h"
 #include "native-buffer-residency.h"
 #include "local-platform.h"
 #include "native-resource-state.h"
@@ -96,7 +97,7 @@ inline void InitializePerformanceSwitches() {
 	    Switch {"KYTY_TEXTURE_RESOLVE_PAGES", &kyty_local_texture_resolve_pages_mode},
 	    Switch {"KYTY_PARTIAL_IMAGE_DIRTY", &kyty_local_partial_image_dirty_mode, 0, 2},
 	    Switch {"KYTY_PARTIAL_ROW_BANDS", &kyty_local_partial_row_bands_mode},
-	    // Sampled views refresh only their levels of a streamed texture (default on; 0 for an A/B).
+	    // Sampled views refresh only their levels of a streamed texture (default off here: worse 1-1 arrivals).
 	    Switch {"KYTY_TEXTURE_LEVELS", &kyty_local_texture_levels_mode},
 	    Switch {"KYTY_ASYNC_REPROTECT", &kyty_local_async_reprotect_mode},
 	    Switch {"KYTY_READBACK_NARROW", &kyty_local_readback_narrow_mode},
@@ -140,6 +141,9 @@ inline void InitializePerformanceSwitches() {
 	    Switch {"KYTY_TABLE_SET_PROOFS", &kyty_local_table_set_proofs, 0, 2},
 #endif
 	    Switch {"KYTY_SPECULATE", &kyty_local_speculate_mode, 0, 4},
+	    // Causal probe (causal-probe.h): the site and its delay per hit in ns.
+	    Switch {"KYTY_PROBE_SITE", &kyty_local_probe_site, 0, CausalProbe::SiteCount - 1},
+	    Switch {"KYTY_PROBE_NS", &kyty_local_probe_ns, 0, 10000000},
 	    Switch {"KYTY_SPECULATE_THREADS", &kyty_local_speculate_threads, 1, 8},
 	};
 	std::string enabled;
@@ -166,6 +170,16 @@ inline void InitializePerformanceSwitches() {
 	if (const char* cpus = std::getenv("KYTY_RENDER_CPUS"); cpus != nullptr && *cpus != '\0') {
 		LocalPlatform::PinThreadToCpuList(cpus);
 		enabled += std::string(enabled.empty() ? "" : " ") + "KYTY_RENDER_CPUS=" + cpus;
+	}
+	// KYTY_PROCESS_CPUS (e.g. the P-cores "0-15"): the default CPU sets of every thread of the process
+	// without its own (the game's threads included), while the process itself may run on all CPUs so
+	// that background threads (KYTY_BACKGROUND_CPUS) can take the others. A process-wide affinity
+	// (the launcher's /AFFINITY) would box the background work in with the game's threads.
+	if (const char* cpus = std::getenv("KYTY_PROCESS_CPUS"); cpus != nullptr && *cpus != '\0') {
+		if (LocalPlatform::SetProcessDefaultCpuList(cpus))
+			enabled += std::string(enabled.empty() ? "" : " ") + "KYTY_PROCESS_CPUS=" + cpus;
+		else
+			std::printf("KYTY_PROCESS_CPUS=%s: the default CPU sets could not be set\n", cpus);
 	}
 	// Above the game's threads (KYTY_RENDER_PRIORITY=0: normal). Walking into a new area, the game's threads
 	// streaming it in held the render CPUs for whole time slices: frames of 35-50 ms where the render thread

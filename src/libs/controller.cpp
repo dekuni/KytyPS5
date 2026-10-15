@@ -13,6 +13,11 @@
 #include "libs/padData.h"
 #include "loader/demonsSoulsWarp.h"
 
+#include <cstdlib>
+#include <string_view>
+#include <mutex>
+#include <chrono>
+#include <cstdio>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -302,6 +307,7 @@ void GameController::Connect(int id) {
 	}
 
 	m_connected_ids.push_back(id);
+	std::printf("Controller: connected id=%d (%zu connected)\n", id, m_connected_ids.size());
 
 	CheckActive();
 }
@@ -310,9 +316,14 @@ void GameController::Disconnect(int id) {
 	Common::LockGuard lock(m_mutex);
 
 	const auto it = std::find(m_connected_ids.begin(), m_connected_ids.end(), id);
-	EXIT_IF(it == m_connected_ids.end());
+	if (it == m_connected_ids.end()) {
+		// A removal for a device that was never connected here (a controller unplugged while the
+		// game was starting, or one SDL reported twice) is nothing to act on.
+		return;
+	}
 
 	m_connected_ids.erase(it);
+	std::printf("Controller: disconnected id=%d (%zu connected)\n", id, m_connected_ids.size());
 
 	CheckActive();
 }
@@ -602,6 +613,123 @@ void GameController::GetConnectionInfo(bool* flag, int* count) {
 	*count = m_connected_count;
 }
 
+// ---- input recording and replay ------------------------------------------------------------
+// One record per pad read: microseconds since the recording started, buttons, the six axes.
+// The replay is driven by the recording's clock, so it reproduces what the player did in wall
+// time regardless of how long loading took; it cannot make a game with a variable time step land
+// in exactly the same spot, but it reproduces the same path through the same places.
+namespace {
+#pragma pack(push, 1)
+struct InputRecord {
+	uint32_t dt_us;
+	uint32_t buttons;
+	uint8_t  axes[6];
+};
+#pragma pack(pop)
+std::mutex                g_input_tape_mutex;
+FILE*                     g_record_file  = nullptr;
+uint64_t                  g_record_t0    = 0;
+std::vector<InputRecord>  g_replay;
+size_t                    g_replay_index = 0;
+uint64_t                  g_replay_t0    = 0;
+bool                      g_replay_loaded = false, g_replay_running = false, g_replay_done = false;
+uint32_t                  g_replay_poll  = 0;
+
+uint64_t InputNowUs() {
+	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+	                                 std::chrono::steady_clock::now().time_since_epoch())
+	                                 .count());
+}
+
+void LoadReplayOnce() {
+	if (g_replay_loaded) return;
+	g_replay_loaded = true;
+	const char* path = std::getenv("KYTY_INPUT_REPLAY");
+	if (path == nullptr || path[0] == 0) return;
+	FILE* f = std::fopen(path, "rb");
+	if (f == nullptr) {
+		std::printf("Input replay: cannot open %s\n", path);
+		return;
+	}
+	InputRecord r {};
+	while (std::fread(&r, sizeof(r), 1, f) == 1) g_replay.push_back(r);
+	std::fclose(f);
+	std::printf("Input replay: %zu records loaded from %s\n", g_replay.size(), path);
+	const char* start = std::getenv("KYTY_INPUT_REPLAY_START");
+	if (start != nullptr && std::string_view(start) == "now" && !g_replay.empty()) {
+		g_replay_running = true;
+		g_replay_t0      = InputNowUs();
+		std::printf("Input replay: started\n");
+	}
+}
+
+// Replay start trigger: a file the harness creates once the level has loaded.
+void PollReplayStart() {
+	if (g_replay_running || g_replay_done || g_replay.empty()) return;
+	if ((++g_replay_poll % 30) != 0) return; // ~twice a second at 60 reads/s
+	const char* start = std::getenv("KYTY_INPUT_REPLAY_START");
+	if (start == nullptr || start[0] == 0 || std::string_view(start) == "now") return;
+	if (FILE* f = std::fopen(start, "rb"); f != nullptr) {
+		std::fclose(f);
+		std::remove(start);
+		g_replay_running = true;
+		g_replay_t0      = InputNowUs();
+		std::printf("Input replay: started (%zu records)\n", g_replay.size());
+	}
+}
+
+// Overrides the live state with the recorded one for this moment; false once the tape has ended.
+bool ApplyReplay(ControllerState& state) {
+	if (!g_replay_running) return false;
+	const auto t = InputNowUs() - g_replay_t0;
+	while (g_replay_index + 1 < g_replay.size() && g_replay[g_replay_index + 1].dt_us <= t) {
+		g_replay_index++;
+	}
+	if (g_replay_index + 1 >= g_replay.size() && t > g_replay.back().dt_us + 500000) {
+		g_replay_running = false;
+		g_replay_done    = true;
+		std::printf("Input replay: finished\n");
+		std::fflush(stdout);
+		return false;
+	}
+	const auto& r = g_replay[g_replay_index];
+	state.buttons = r.buttons;
+	for (int i = 0; i < 6; i++) state.axes[i] = r.axes[i];
+	return true;
+}
+
+void RecordState(const ControllerState& state) {
+	if (g_record_file == nullptr) return;
+	InputRecord r {};
+	r.dt_us   = static_cast<uint32_t>(std::min<uint64_t>(InputNowUs() - g_record_t0, UINT32_MAX));
+	r.buttons = state.buttons;
+	for (int i = 0; i < 6; i++) r.axes[i] = static_cast<uint8_t>(std::clamp(state.axes[i], 0, 255));
+	std::fwrite(&r, sizeof(r), 1, g_record_file);
+	std::fflush(g_record_file); // a crash must not lose the tape
+}
+} // namespace
+
+void ToggleRecording() {
+	std::lock_guard lock(g_input_tape_mutex);
+	if (g_record_file != nullptr) {
+		std::fclose(g_record_file);
+		g_record_file = nullptr;
+		std::printf("Input recording: stopped\n");
+		std::fflush(stdout);
+		return;
+	}
+	const char* path = std::getenv("KYTY_INPUT_RECORD");
+	if (path == nullptr || path[0] == 0) {
+		std::printf("Input recording: set KYTY_INPUT_RECORD=<file> to record\n");
+		std::fflush(stdout);
+		return;
+	}
+	g_record_file = std::fopen(path, "wb");
+	g_record_t0   = InputNowUs();
+	std::printf("Input recording: %s %s\n", g_record_file != nullptr ? "started ->" : "cannot open", path);
+	std::fflush(stdout);
+}
+
 void GameController::ReadState(ControllerState* state, bool* flag, int* count) {
 	EXIT_IF(flag == nullptr);
 	EXIT_IF(count == nullptr);
@@ -612,6 +740,16 @@ void GameController::ReadState(ControllerState* state, bool* flag, int* count) {
 	*flag  = m_connected;
 	*count = m_connected_count;
 	*state = m_state;
+	{
+		std::lock_guard tape(g_input_tape_mutex);
+		LoadReplayOnce();
+		PollReplayStart();
+		if (ApplyReplay(*state)) {
+			m_state.buttons = state->buttons; // the live state follows the tape (ReadStates too)
+			std::copy_n(state->axes, 6, m_state.axes);
+		}
+		RecordState(*state);
+	}
 }
 
 int GameController::ReadStates(ControllerState* states, int states_num, bool* flag, int* count) {

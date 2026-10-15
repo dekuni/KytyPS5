@@ -17,6 +17,7 @@
 #include "graphics/host_gpu/renderer/pipeline/shaderReadObserver.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
+#include "graphics/shader/recompiler/ShaderDiskCache.h"
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
 #include "graphics/shader/recompiler/ir/passes/LinearSrt.h"
 #include "resource-plan-serial.h"
@@ -175,8 +176,34 @@ bool ReadShaderGuestMemory(void*, uint64_t address, uint32_t* value) {
 		*value = 0;
 		return true;
 	}
-	return value != nullptr &&
-	       Libs::LibKernel::Memory::TryReadGpuCleanBackingToHost(address, value, sizeof(*value));
+	if (value == nullptr) {
+		return false;
+	}
+	if (Libs::LibKernel::Memory::TryReadGpuCleanBackingToHost(address, value, sizeof(*value))) {
+		return true;
+	}
+	// The descriptor memory is GPU-written and not downloaded yet (Demon's Souls builds some of its
+	// tables on the GPU). Giving up here made the walk drop the resource and compile a degenerate
+	// permutation of the shader (a null buffer, a missing image): a slow driver compile, a wrong
+	// specialization, and new ones every launch at the same spot (100+ compute pipelines a launch
+	// in a visited area). Downloading the word first costs a GPU drain, which is rare and far
+	// cheaper on the original walk; on this branch's native XPR path, which re-reads the tables of
+	// every object that comes into view, the downloads cost about 10% while walking (gate view,
+	// 2026-10-03: 28-29 fps with it, 29-33 without, his untouched build 29-37), and the static
+	// precompile already covers the variants. Off unless KYTY_SRT_SYNC=1.
+	static const bool sync_enabled = [] {
+		const char* v = std::getenv("KYTY_SRT_SYNC");
+		return v != nullptr && v[0] == '1';
+	}();
+	if (!sync_enabled || !Libs::LibKernel::Memory::SyncGpuCleanBacking(address, sizeof(*value)) ||
+	    !Libs::LibKernel::Memory::TryReadGpuCleanBackingToHost(address, value, sizeof(*value))) {
+		return false;
+	}
+	static std::atomic<uint32_t> synced {0};
+	if (const auto n = synced.fetch_add(1, std::memory_order_relaxed) + 1; (n & (n - 1)) == 0) {
+		std::printf("Shader walk: %u descriptor read(s) needed a GPU download first\n", n);
+	}
+	return true;
 }
 
 bool SyncShaderGuestMemory(void*, uint64_t address, uint64_t size) {
@@ -457,12 +484,15 @@ struct PipelineCache::ProgramCache {
 		struct Group { // the inputs of one program
 			ProgramKey                                        key;
 			uint64_t                                          source = 0; // SourceDigest
+			uint64_t                                          records_hash = 0; // its inputs' bytes
 			size_t                                            code_words = 0;
 			uint32_t                                          recorded = UINT32_MAX; // its first record in this PC's play
 			std::vector<uint32_t>                             records;
 			std::atomic<uint8_t>                              state {Pending};
 			std::optional<ShaderRecompiler::IR::ResourcePlan> plan;
 			std::vector<PrefetchedModule>                     modules;
+			std::span<const uint8_t>                          stored; // its entry in the store (StoreEntry)
+			std::atomic<bool>                                 stored_appended {false}; // in the new index
 			// The plan in the scratch file instead (zstd-compressed ResourcePlanSerial bytes): `plan` stays empty until
 			// the game takes the group over (LoadSpilledPlan). Its linear SRT plan stays here: rebuilding it (its code
 			// generated, its AOT function looked up) took ~1 ms of the render thread's per plan; the plan's values ~0.2.
@@ -475,6 +505,7 @@ struct PipelineCache::ProgramCache {
 			if (loader.joinable()) loader.join();
 			for (auto& thread: threads) thread.join();
 			LocalPlatform::CloseScratchFile(spill);
+			LocalPlatform::CloseScratchFile(store_new);
 		}
 
 		LocalShaderWarmup::Cache                               inputs;
@@ -487,6 +518,17 @@ struct PipelineCache::ProgramCache {
 		uint64_t                                               spill = 0;
 		std::thread                                            loader;
 		std::vector<std::thread>                               threads;
+		// The translation store (StoreTranslations): the index read at the start (the groups' `stored`
+		// point into it), the new index written as groups finish, renamed over the old one at the end.
+		std::vector<uint8_t>                                   store_index;
+		std::filesystem::path                                  store_path;
+		uint64_t                                               store_new = 0;
+		std::atomic<uint64_t>                                  store_new_end {0};
+		std::mutex                                             store_mutex;
+		std::atomic<bool>                                      store_failed {false}; // a write of the new index failed
+		uint64_t                                               store_spirv_size = 0; // the SPIR-V file's size at the start
+		std::atomic<size_t>                                    from_store {0}, store_rejected {0}, verified {0},
+		                                                       verify_mismatches {0};
 		// Render thread: programs and modules taken over, programs translated there while pending.
 		size_t adopted = 0, adopted_modules = 0, claimed = 0;
 		// Render thread: spilled plans loaded back, and the time it took (LoadSpilledPlan).
@@ -550,6 +592,354 @@ struct PipelineCache::ProgramCache {
 		return XXH3_64bits_withSeed(back_code.data(), back_code.size_bytes(), XXH3_64bits(code.data(), code.size_bytes()));
 	}
 
+	// KYTY_SHADER_STORE (default on; 0 off): the prefetch keeps its translations between runs (after
+	// upstream PR #988), in _PipelineCache/translated/<title>.<switches hash>.index (per program: its key, its source
+	// and inputs' hashes, its resource plan and its modules' shader info, ShaderDiskCache) and .spirv
+	// (the modules' SPIR-V). A program comes from there when its inputs are the same, and the
+	// recompiler's sources (KYTY_RECOMPILER_SIGNATURE) and the switches that change a translation were
+	// when it was kept; the others are translated and added. KYTY_SHADER_STORE_VERIFY=1: every program
+	// from the store is translated as well and compared (plan, shader info and SPIR-V).
+	static constexpr uint32_t StoreMagic   = 0x4952544bu; // "KTRI"
+	static constexpr uint32_t StoreVersion = 1u;
+
+	static bool StoreEnabled() {
+		static const bool enabled = [] {
+			const char* value = std::getenv("KYTY_SHADER_STORE");
+			return (value == nullptr || value[0] != '0') && std::string_view(KYTY_RECOMPILER_SIGNATURE) != "none";
+		}();
+		return enabled;
+	}
+	static bool StoreVerify() {
+		static const bool verify = [] {
+			const char* value = std::getenv("KYTY_SHADER_STORE_VERIFY");
+			return value != nullptr && value[0] == '1';
+		}();
+		return verify;
+	}
+	// The switches the recompiler reads that change what it produces.
+	static std::string StoreSwitches() {
+		std::string text;
+		for (const char* name: {"KYTY_FRONT_FACE_FLOAT", "KYTY_PORTABLE_SHADERS", "KYTY_SRT_LINEAR_VERIFY",
+		                        "KYTY_EXEC_DEMAND", "KYTY_LANE_LOCAL", "KYTY_LANE_LOCAL_TITLE", "KYTY_LANE_LOCAL_UNIFORM_LOADS",
+		                        "KYTY_PS_WAVE_OR"}) {
+			const char* value = std::getenv(name);
+			text += fmt::format("{}={};", name, value != nullptr ? value : "");
+		}
+		return text;
+	}
+
+	struct StoreWriter {
+		std::vector<uint8_t> bytes;
+		template <typename T>
+		requires(std::is_arithmetic_v<T>)
+		void Put(T value) {
+			const auto* data = reinterpret_cast<const uint8_t*>(&value);
+			bytes.insert(bytes.end(), data, data + sizeof(T));
+		}
+		void Put(std::span<const uint8_t> data) {
+			Put(static_cast<uint32_t>(data.size()));
+			bytes.insert(bytes.end(), data.begin(), data.end());
+		}
+	};
+	struct StoreReader {
+		std::span<const uint8_t> bytes;
+		size_t                   at = 0;
+		bool                     ok = true;
+		template <typename T>
+		T Get() {
+			T value {};
+			if (!ok || bytes.size() - at < sizeof(T)) {
+				ok = false;
+				return value;
+			}
+			std::memcpy(&value, bytes.data() + at, sizeof(T));
+			at += sizeof(T);
+			return value;
+		}
+		std::span<const uint8_t> Span() {
+			const auto size = Get<uint32_t>();
+			if (!ok || bytes.size() - at < size) {
+				ok = false;
+				return {};
+			}
+			const auto result = bytes.subspan(at, size);
+			at += size;
+			return result;
+		}
+	};
+
+	static std::vector<uint8_t> StoreHeader() {
+		StoreWriter writer;
+		writer.Put(StoreMagic);
+		writer.Put(StoreVersion);
+		writer.Put(ShaderRecompiler::DiskCache::kFormatVersion);
+		const std::string_view signature = KYTY_RECOMPILER_SIGNATURE;
+		const auto             switches  = StoreSwitches();
+		writer.Put(std::span(reinterpret_cast<const uint8_t*>(signature.data()), signature.size()));
+		writer.Put(std::span(reinterpret_cast<const uint8_t*>(switches.data()), switches.size()));
+		return std::move(writer.bytes);
+	}
+
+	// An entry: its program's key, source and inputs hashes, its plan and its modules (shader info, SPIR-V
+	// offset and words); the caller puts its size first.
+	static std::vector<uint8_t> StoreEntry(const Prefetch::Group& group, std::span<const uint8_t> plan) {
+		StoreWriter writer;
+		writer.Put(static_cast<uint32_t>(group.key.stage));
+		writer.Put(group.key.hash);
+		writer.Put(group.key.user_data_count);
+		writer.Put(group.key.code_size);
+		writer.Put(std::span(reinterpret_cast<const uint8_t*>(group.key.static_state.data()),
+		                     group.key.static_state.size() * sizeof(uint32_t)));
+		writer.Put(group.source);
+		writer.Put(group.records_hash);
+		writer.Put(plan);
+		writer.Put(static_cast<uint32_t>(group.modules.size()));
+		for (const auto& module: group.modules) {
+			const auto bytes = ShaderRecompiler::DiskCache::SerializeModule(module.specialization, module.program);
+			writer.Put(std::span<const uint8_t>(bytes));
+			writer.Put(static_cast<uint64_t>(module.spirv_offset));
+			writer.Put(static_cast<uint64_t>(module.spirv_words));
+		}
+		return std::move(writer.bytes);
+	}
+
+	// The key of an entry (its first fields).
+	static bool StoreEntryKey(std::span<const uint8_t> entry, ProgramKey& key, uint64_t& source, uint64_t& records_hash) {
+		StoreReader reader {entry};
+		key.stage           = static_cast<ShaderType>(reader.Get<uint32_t>());
+		key.hash            = reader.Get<uint64_t>();
+		key.user_data_count = reader.Get<uint32_t>();
+		key.code_size       = reader.Get<uint32_t>();
+		const auto words    = reader.Span();
+		key.static_state.resize(words.size() / sizeof(uint32_t));
+		if (!words.empty()) std::memcpy(key.static_state.data(), words.data(), key.static_state.size() * sizeof(uint32_t));
+		source       = reader.Get<uint64_t>();
+		records_hash = reader.Get<uint64_t>();
+		return reader.ok && words.size() % sizeof(uint32_t) == 0;
+	}
+
+	// The end of the SPIR-V an entry's modules name in the store's file; false when it does not read.
+	static bool StoreEntryEnd(std::span<const uint8_t> entry, uint64_t& end) {
+		ProgramKey  key;
+		uint64_t    source = 0, records_hash = 0;
+		StoreReader reader {entry};
+		if (!StoreEntryKey(entry, key, source, records_hash)) return false;
+		(void)reader.Get<uint32_t>(), (void)reader.Get<uint64_t>(), (void)reader.Get<uint32_t>(), (void)reader.Get<uint32_t>();
+		(void)reader.Span(), (void)reader.Get<uint64_t>(), (void)reader.Get<uint64_t>();
+		(void)reader.Span();
+		const auto modules = reader.Get<uint32_t>();
+		for (uint32_t i = 0; reader.ok && i < modules; ++i) {
+			(void)reader.Span();
+			const auto offset = reader.Get<uint64_t>();
+			const auto words  = reader.Get<uint64_t>();
+			end               = std::max(end, offset + words * sizeof(uint32_t));
+		}
+		return reader.ok;
+	}
+
+	// The group's plan and modules from its entry; false (and nothing set) when it does not read.
+	bool LoadStored(Prefetch::Group& group) {
+		ProgramKey  key;
+		uint64_t    source = 0, records_hash = 0;
+		StoreReader reader {group.stored};
+		if (!StoreEntryKey(group.stored, key, source, records_hash)) return false;
+		(void)reader.Get<uint32_t>(), (void)reader.Get<uint64_t>(), (void)reader.Get<uint32_t>(), (void)reader.Get<uint32_t>();
+		(void)reader.Span(), (void)reader.Get<uint64_t>(), (void)reader.Get<uint64_t>();
+		const auto plan_bytes = reader.Span();
+		if (!reader.ok) return false;
+		// No plan: a program the recompiler rejects (code the game never runs), no modules.
+		std::optional<ShaderRecompiler::IR::ResourcePlan> plan;
+		if (!plan_bytes.empty() && !ShaderRecompiler::DiskCache::DeserializePlan(plan_bytes, plan.emplace())) return false;
+		std::vector<PrefetchedModule> modules(reader.Get<uint32_t>());
+		if (!plan && !modules.empty()) return false;
+		if (!reader.ok || modules.size() > group.records.size()) return false;
+		for (auto& module: modules) {
+			const auto bytes = reader.Span();
+			if (!reader.ok || !ShaderRecompiler::DiskCache::DeserializeModule(bytes, module.specialization, module.program))
+				return false;
+			module.spirv_offset = reader.Get<uint64_t>();
+			module.spirv_words  = reader.Get<uint64_t>();
+		}
+		if (!reader.ok || reader.at != group.stored.size()) return false;
+		group.plan    = std::move(plan);
+		group.modules = std::move(modules);
+		return true;
+	}
+
+	// Appends an entry to the new index (a worker or the render thread).
+	void AppendStoreEntry(std::span<const uint8_t> entry) {
+		auto& p = *prefetch;
+		if (p.store_new == 0 || entry.empty()) return;
+		const auto size   = static_cast<uint32_t>(entry.size());
+		const auto offset = p.store_new_end.fetch_add(sizeof(size) + entry.size(), std::memory_order_relaxed);
+		if (!LocalPlatform::WriteScratchFile(p.store_new, offset, &size, sizeof(size)) ||
+		    !LocalPlatform::WriteScratchFile(p.store_new, offset + sizeof(size), entry.data(), entry.size())) {
+			p.store_failed.store(true); // the new index is not complete: it is not kept (CloseStore)
+		}
+	}
+
+	// The group's entry in the new index: the kept one, or one made from its translation (none when its
+	// plan holds a value the store cannot express: it is translated again next time).
+	void AppendGroupEntry(Prefetch::Group& group, bool kept) {
+		auto& p = *prefetch;
+		if (p.store_new == 0 || group.stored_appended.exchange(true)) return;
+		if (kept) {
+			AppendStoreEntry(group.stored);
+			return;
+		}
+		std::vector<uint8_t> plan;
+		if (group.plan) {
+			plan = ShaderRecompiler::DiskCache::SerializePlan(*group.plan);
+			if (plan.empty()) return;
+		}
+		AppendStoreEntry(StoreEntry(group, plan));
+	}
+
+	// Opens the store (the old index read, the SPIR-V file kept or emptied, the new index begun) and
+	// points the groups at their entries; false when there is no store (the SPIR-V then goes to a
+	// temporary file).
+	bool OpenStore(const std::filesystem::path& inputs_path) {
+		auto& p = *prefetch;
+		if (!StoreEnabled()) return false;
+		const auto directory = inputs_path.parent_path().parent_path() / "translated";
+		std::error_code error;
+		std::filesystem::create_directories(directory, error);
+		// Each set of switches keeps a store of its own, so an A/B of a switch does not translate the game
+		// again at every launch. SHORTCUT: a store whose recompiler or switches are gone stays on disk
+		// (~6 GB) until deleted; prune by age if more than a few sets come into use.
+		const auto switches  = StoreSwitches();
+		const auto name      = inputs_path.stem().string() +
+		                  fmt::format(".{:08x}", static_cast<uint32_t>(XXH3_64bits(switches.data(), switches.size())));
+		p.store_path         = directory / (name + ".index");
+		const auto spirv     = directory / (name + ".spirv");
+		const auto header    = StoreHeader();
+		size_t     entries   = 0, matched = 0;
+		{
+			Common::File file;
+			if (std::filesystem::exists(p.store_path, error) && file.Open(p.store_path, Common::File::Mode::Read)) {
+				p.store_index.resize(file.Size());
+				uint32_t read = 0;
+				if (!p.store_index.empty()) file.Read(p.store_index.data(), static_cast<uint32_t>(p.store_index.size()), &read);
+				file.Close();
+				if (read != p.store_index.size() || p.store_index.size() < header.size() ||
+				    std::memcmp(p.store_index.data(), header.data(), header.size()) != 0) {
+					p.store_index.clear(); // another recompiler, other switches, or damaged: translated again
+				}
+			}
+		}
+		const bool kept = !p.store_index.empty();
+		std::unordered_map<ProgramKey, std::span<const uint8_t>, ProgramKeyHash> found;
+		uint64_t   named_end = 0; // the end of the SPIR-V the kept index names
+		bool       named_all = kept;
+		for (StoreReader reader {p.store_index, header.size()}; kept && reader.at < p.store_index.size();) {
+			const auto entry = reader.Span();
+			if (!reader.ok) {
+				named_all = false;
+				break;
+			}
+			ProgramKey key;
+			uint64_t   source = 0, records_hash = 0;
+			if (StoreEntryKey(entry, key, source, records_hash)) found.insert_or_assign(std::move(key), entry);
+			named_all = StoreEntryEnd(entry, named_end) && named_all;
+			++entries;
+		}
+		size_t missing = 0;
+		for (auto& group: p.groups) {
+			XXH3_state_t* state = XXH3_createState();
+			XXH3_64bits_reset(state);
+			for (const auto index: group->records)
+				XXH3_64bits_update(state, p.inputs.records[index].data(), p.inputs.records[index].size() * sizeof(uint32_t));
+			group->records_hash = XXH3_64bits_digest(state);
+			XXH3_freeState(state);
+			const auto entry = found.find(group->key);
+			ProgramKey key;
+			uint64_t   source = 0, records_hash = 0;
+			if (entry != found.end() && StoreEntryKey(entry->second, key, source, records_hash) &&
+			    source == group->source && records_hash == group->records_hash) {
+				group->stored = entry->second;
+				++matched;
+			} else {
+				++missing;
+			}
+		}
+		p.spill = LocalPlatform::OpenFileForWriting(Common::PathToString(spirv).c_str(), !kept);
+		if (p.spill == 0) {
+			for (auto& group: p.groups) group->stored = {};
+			p.store_index.clear();
+			return false;
+		}
+		p.store_spirv_size = LocalPlatform::FileSize(p.spill);
+		// An index naming SPIR-V past the file's end (the .spirv deleted or cut short, the .index kept): its entries would
+		// read what this run's translations write there. Started over.
+		if (kept && named_end > p.store_spirv_size) {
+			PipelineCacheLog("Shader prefetch: translation store SPIR-V {} MiB, its index names {} MiB: started over",
+			                 p.store_spirv_size >> 20u, named_end >> 20u);
+			for (auto& group: p.groups) group->stored = {};
+			found.clear();
+			p.store_index.clear();
+			missing += matched;
+			matched   = 0;
+			entries   = 0;
+			named_all = false;
+			(void)LocalPlatform::TruncateFile(p.spill, 0);
+			p.store_spirv_size = LocalPlatform::FileSize(p.spill);
+		}
+		// Past the SPIR-V the kept index names: earlier runs' scratch (the resource plans SpillPlan writes to this file, a
+		// run's translations when it ended before its index was written), read by no one. Cut off: the file grew at every
+		// launch (10-14: 11.4 GB holding 3 GB of SPIR-V the index names).
+		if (named_all && named_end < p.store_spirv_size && LocalPlatform::TruncateFile(p.spill, named_end)) {
+			PipelineCacheLog("Shader prefetch: translation store SPIR-V {} -> {} MiB (earlier runs' scratch cut off)",
+			                 p.store_spirv_size >> 20u, named_end >> 20u);
+			p.store_spirv_size = named_end;
+		}
+		p.spill_end.store(p.store_spirv_size, std::memory_order_relaxed);
+		// A new index only when there is something to add (or to check): all of it, the kept entries too.
+		if (missing != 0 || StoreVerify()) {
+			const auto path = Common::PathToString(p.store_path) + ".new";
+			p.store_new     = LocalPlatform::OpenFileForWriting(path.c_str(), true);
+			if (p.store_new != 0 && LocalPlatform::WriteScratchFile(p.store_new, 0, header.data(), header.size())) {
+				p.store_new_end.store(header.size(), std::memory_order_relaxed);
+			} else {
+				LocalPlatform::CloseScratchFile(p.store_new);
+				p.store_new = 0;
+			}
+		}
+		PipelineCacheLog("Shader prefetch: translation store {}: {} of {} programs kept ({} entries, {} MiB of SPIR-V){}",
+		                 Common::PathToString(p.store_path), matched, p.groups.size(), entries,
+		                 p.spill_end.load(std::memory_order_relaxed) >> 20u,
+		                 kept ? "" : " - new (another recompiler, other switches, or none yet)");
+		return true;
+	}
+
+	// All groups done: the new index replaces the old one.
+	void CloseStore() {
+		auto& p = *prefetch;
+		std::lock_guard lock(p.store_mutex);
+		if (p.store_new == 0) return;
+		LocalPlatform::CloseScratchFile(p.store_new);
+		p.store_new = 0;
+		std::error_code error;
+		const auto      written = Common::PathToString(p.store_path) + ".new";
+		// A verification that found every kept translation the same leaves the store as it was: the fresh
+		// translations' SPIR-V it appended is cut off again.
+		if (StoreVerify() && p.verify_mismatches.load() == 0 && p.store_rejected.load() == 0 &&
+		    p.from_store.load() == p.groups.size()) {
+			std::filesystem::remove(written, error);
+			(void)LocalPlatform::TruncateFile(p.spill, p.store_spirv_size);
+			PipelineCacheLog("Shader prefetch: the translation store verified, kept as it was");
+			return;
+		}
+		if (p.store_failed.load()) {
+			std::filesystem::remove(written, error);
+			PipelineCacheLog("Shader prefetch: the translation store could not be written");
+			return;
+		}
+		std::filesystem::rename(written, p.store_path, error);
+		PipelineCacheLog("Shader prefetch: translation store written ({} MiB index, {} MiB of SPIR-V){}",
+		                 p.store_new_end.load(std::memory_order_relaxed) >> 20u,
+		                 p.spill_end.load(std::memory_order_relaxed) >> 20u, error ? " - could not replace the old index" : "");
+	}
+
 	// Loads the inputs on a thread of its own, leaves out the programs the warmup holds (`warm`), and
 	// starts the translation: first the programs of this PC's recorded play (`recorded`, the warmup's records when it
 	// translated none) in the order they were first met, then the rest, the biggest first.
@@ -605,17 +995,15 @@ struct PipelineCache::ProgramCache {
 			std::ranges::stable_sort(p.groups, {}, [](const auto& group) {
 				return std::pair {group->recorded, ~group->code_words};
 			});
-			p.spill = LocalPlatform::OpenScratchFile();
+			if (!OpenStore(path)) p.spill = LocalPlatform::OpenScratchFile();
 			if (p.spill == 0) {
 				PipelineCacheLog("Shader prefetch: no temporary file for the SPIR-V");
 				return;
 			}
-			// The CPUs the game leaves: its loading keeps about 12 threads busy (guest job threads, the GPU and recording
-			// threads), and prefetch threads beside them (on the other half of a core) slow them however low their
-			// priority. An 8-core laptop (16 CPUs) with 8 prefetch threads took 120+ s instead of 20 s to load 1-1
-			// (start-up to the game 264-300 s; with 4: 107 s); half the CPUs at most (a 32-CPU desktop keeps 16).
-			const uint32_t cpus    = std::max(1u, std::thread::hardware_concurrency());
-			uint32_t       threads = std::clamp(cpus > 12u ? cpus - 12u : 2u, 2u, std::max(2u, cpus / 2u));
+			// Two threads: at half the machine's (12 on a 24-thread CPU, all of its E-cores busy for ~70 s) the
+			// game's sound lagged from the intro on (2026-10-05); chen's two cores did not disturb it. (His rule since
+			// 10-12, the CPUs past 12 up to half: 12 here again.)
+			uint32_t threads = 2;
 			if (const char* value = std::getenv("KYTY_SHADER_PREFETCH_THREADS"); value != nullptr && *value != '\0')
 				threads = std::clamp(static_cast<uint32_t>(std::strtoul(value, nullptr, 10)), 1u, 64u);
 			PipelineCacheLog("Shader prefetch: {} programs ({} inputs, {} recorded first) to translate on {} threads, loaded in {} ms",
@@ -640,12 +1028,30 @@ struct PipelineCache::ProgramCache {
 				SpillPlan(p, group);
 				group.state.store(Prefetch::Done, std::memory_order_release);
 				group.state.notify_all();
+			} else if (expected == Prefetch::Taken && p.store_new != 0 && !group.stored_appended.load()) {
+				// The render thread translated it itself (it met it first): translated here too, for the
+				// store only (the render thread no longer looks at a group it took).
+				PrefetchTranslate(group);
+				group.plan.reset();
+				group.modules.clear();
+			} else if (expected == Prefetch::Running) {
+				// The render thread reads it from the store now (PrefetchedGroup): counted once it is done, so the
+				// last count, which closes the store and frees its index, cannot come while it still reads them.
+				group.state.wait(Prefetch::Running, std::memory_order_acquire);
 			}
 			if (p.finished.fetch_add(1, std::memory_order_relaxed) + 1 == p.groups.size()) {
-				PipelineCacheLog("Shader prefetch: all {} programs translated, {} MiB of SPIR-V ({} MiB compressed)",
-				                 p.groups.size(), p.spirv_bytes.load(std::memory_order_relaxed) >> 20u,
-				                 p.spill_end.load(std::memory_order_relaxed) >> 20u);
+				PipelineCacheLog("Shader prefetch: all {} programs done, {} from the translation store ({} rejected), "
+				                 "{} MiB of SPIR-V translated ({} MiB in the scratch file){}",
+				                 p.groups.size(), p.from_store.load(), p.store_rejected.load(),
+				                 p.spirv_bytes.load(std::memory_order_relaxed) >> 20u,
+				                 p.spill_end.load(std::memory_order_relaxed) >> 20u,
+				                 StoreVerify() ? fmt::format(", {} verified, {} differ", p.verified.load(),
+				                                             p.verify_mismatches.load())
+				                               : std::string {});
+				CloseStore();
 				std::vector<std::vector<uint32_t>>().swap(p.inputs.records); // no longer read
+				for (auto& done: p.groups) done->stored = {};
+				std::vector<uint8_t>().swap(p.store_index);
 				const auto mib = [&](PrefetchMemoryPart part) { return p.memory[part].load(std::memory_order_relaxed) >> 20u; };
 				PipelineCacheLog("Shader prefetch memory (MiB): plan values {} memory infos {} other {} info {}, modules info {} "
 				                 "table plans {} read plans {} bindings {} specializations {}, groups {}",
@@ -732,8 +1138,71 @@ struct PipelineCache::ProgramCache {
 		return true;
 	}
 
-	// What PrepareWarmJob does for a recorded input, for each of the program's.
+	// The group's translation: from the store when it holds it, else what PrepareWarmJob does for a
+	// recorded input, for each of the program's (then added to the store).
 	void PrefetchTranslate(Prefetch::Group& group) {
+		auto& p = *prefetch;
+		if (!group.stored.empty()) {
+			if (LoadStored(group)) {
+				p.from_store.fetch_add(1, std::memory_order_relaxed);
+				if (!StoreVerify()) {
+					AppendGroupEntry(group, true);
+					return;
+				}
+				VerifyStored(group);
+				return;
+			}
+			p.store_rejected.fetch_add(1, std::memory_order_relaxed);
+		}
+		TranslateGroup(group);
+		AppendGroupEntry(group, false);
+	}
+
+	// KYTY_SHADER_STORE_VERIFY: the kept translation (loaded) against a fresh one, which the group keeps.
+	void VerifyStored(Prefetch::Group& group) {
+		auto& p              = *prefetch;
+		auto  kept_plan      = std::move(group.plan);
+		auto  kept_modules   = std::move(group.modules);
+		group.plan.reset();
+		group.modules.clear();
+		TranslateGroup(group);
+		const auto spirv = [&](const PrefetchedModule& module) {
+			std::vector<uint32_t> words(module.spirv_words);
+			if (!LocalPlatform::ReadScratchFile(p.spill, module.spirv_offset, words.data(), words.size() * sizeof(uint32_t)))
+				words.clear();
+			return words;
+		};
+		std::string differs;
+		if (kept_plan.has_value() != group.plan.has_value() ||
+		    (kept_plan && ShaderRecompiler::DiskCache::SerializePlan(*kept_plan) !=
+		                      ShaderRecompiler::DiskCache::SerializePlan(*group.plan)))
+			differs = "plan";
+		else if (kept_modules.size() != group.modules.size())
+			differs = fmt::format("{} modules kept, {} now", kept_modules.size(), group.modules.size());
+		for (size_t i = 0; differs.empty() && i < kept_modules.size(); ++i) {
+			const auto& kept = kept_modules[i];
+			const auto& now  = group.modules[i];
+			if (ShaderRecompiler::DiskCache::SerializeModule(kept.specialization, kept.program) !=
+			    ShaderRecompiler::DiskCache::SerializeModule(now.specialization, now.program))
+				differs = fmt::format("module {} info", i);
+			else if (spirv(kept) != spirv(now))
+				differs = fmt::format("module {} SPIR-V", i);
+		}
+		p.verified.fetch_add(1, std::memory_order_relaxed);
+		if (differs.empty()) {
+			// The same: the kept modules (their SPIR-V where the store has it) and the kept entry.
+			group.modules = std::move(kept_modules);
+			AppendGroupEntry(group, true);
+			return;
+		}
+		if (p.verify_mismatches.fetch_add(1, std::memory_order_relaxed) < 16) {
+			PipelineCacheLog("Shader prefetch: the store's translation of 0x{:016x} differs from a fresh one ({})",
+			                 group.key.hash, differs);
+		}
+		AppendGroupEntry(group, false);
+	}
+
+	void TranslateGroup(Prefetch::Group& group) {
 		auto& p = *prefetch;
 		for (const auto index: group.records) {
 			LocalShaderWarmup::Record record;
@@ -751,10 +1220,12 @@ struct PipelineCache::ProgramCache {
 				                                               record.push_cursor);
 				// Compressed (a fifth of the bytes): the file of a whole game's SPIR-V (4.5 GB) is kept in memory by the
 				// system as a temporary file, which an 8 GB-GPU laptop with 32 GB of RAM did not have to spare.
+				// Not in the translation store's SPIR-V file: its entries keep raw words (StoreEntry, LoadStored).
 				const auto  bytes  = result.spirv.size() * sizeof(uint32_t);
-				std::vector<char> packed(ZSTD_compressBound(bytes));
-				const auto  packed_size = ZSTD_compress(packed.data(), packed.size(), result.spirv.data(), bytes, 1);
-				const bool  compressed  = !ZSTD_isError(packed_size) && packed_size < bytes;
+				const bool  pack   = p.store_path.empty();
+				std::vector<char> packed(pack ? ZSTD_compressBound(bytes) : 0);
+				const auto  packed_size = pack ? ZSTD_compress(packed.data(), packed.size(), result.spirv.data(), bytes, 1) : 0;
+				const bool  compressed  = pack && !ZSTD_isError(packed_size) && packed_size < bytes;
 				const void* data        = compressed ? static_cast<const void*>(packed.data()) : result.spirv.data();
 				const auto  stored      = compressed ? packed_size : bytes;
 				const auto  offset      = p.spill_end.fetch_add(stored, std::memory_order_relaxed);
@@ -775,6 +1246,14 @@ struct PipelineCache::ProgramCache {
 		if (found == prefetch->index.end()) return nullptr;
 		auto& group = *found->second;
 		auto  state = group.state.load(std::memory_order_acquire);
+		// Kept in the store: read here (a fraction of a millisecond) rather than translated here.
+		if (state == Prefetch::Pending && !group.stored.empty() && !StoreVerify() &&
+		    group.state.compare_exchange_strong(state, Prefetch::Running, std::memory_order_acq_rel)) {
+			PrefetchTranslate(group);
+			group.state.store(Prefetch::Done, std::memory_order_release);
+			group.state.notify_all();
+			state = Prefetch::Done;
+		}
 		if (state == Prefetch::Pending &&
 		    group.state.compare_exchange_strong(state, Prefetch::Taken, std::memory_order_acq_rel)) {
 			prefetch->claimed++;
@@ -882,10 +1361,45 @@ struct PipelineCache::ProgramCache {
 		return name;
 	}
 
+	// KYTY_SHADER_SWAP_DIR=<folder> (local test hook): a module whose translated SPIR-V has a replacement
+	// <folder>\<XXH3 of that SPIR-V, 16 hex digits>.spv is created from the file instead (validated like a
+	// translation), so a hand-made variant of one shader can be timed against the original in one build. The
+	// key is the module's own SPIR-V, so each permutation (normal, table mode, specializations) is its own.
+	// The modules of the shaders in KYTY_DUMP_HASHES print their key ("Shader swap: ..."). Unset: nothing changes.
+	static const std::vector<uint32_t>& SwappedSpirv(const char* stage_name, uint64_t shader_hash,
+	                                                 const std::vector<uint32_t>& spirv, std::vector<uint32_t>& storage) {
+		static const std::string dir = [] {
+			const char* value = std::getenv("KYTY_SHADER_SWAP_DIR");
+			return value != nullptr ? std::string(value) : std::string();
+		}();
+		if (dir.empty()) return spirv;
+		const auto key  = XXH3_64bits(spirv.data(), spirv.size() * sizeof(uint32_t));
+		const auto path = std::filesystem::path(dir) / fmt::format("{:016x}.spv", key);
+		std::error_code error;
+		const auto      bytes = std::filesystem::file_size(path, error);
+		if (error || bytes == 0 || bytes % sizeof(uint32_t) != 0) {
+			if (DumpWanted(shader_hash))
+				std::printf("Shader swap: %s 0x%016" PRIx64 " spirv %016" PRIx64 " (%zu words), no replacement\n", stage_name,
+				            shader_hash, static_cast<uint64_t>(key), spirv.size());
+			return spirv;
+		}
+		storage.resize(bytes / sizeof(uint32_t));
+		FILE* file = std::fopen(Common::PathToString(path).c_str(), "rb");
+		const bool read = file != nullptr && std::fread(storage.data(), 1, bytes, file) == bytes;
+		if (file != nullptr) std::fclose(file);
+		if (!read) EXIT("Shader swap: cannot read %s\n", Common::PathToString(path).c_str());
+		std::printf("Shader swap: %s 0x%016" PRIx64 " spirv %016" PRIx64 " (%zu words) <- %s (%zu words)\n", stage_name,
+		            shader_hash, static_cast<uint64_t>(key), spirv.size(), Common::PathToString(path).c_str(), storage.size());
+		std::fflush(stdout);
+		return storage;
+	}
+
 	// The shader module of a program's SPIR-V, on any thread (a compile worker makes a table mode program's).
 	static vk::ShaderModule CreateModule(vk::Device device, const ShaderRecompiler::CompileOptions& options,
-	                                     const std::vector<uint32_t>& spirv) {
+	                                     const std::vector<uint32_t>& translated) {
 		const char* stage_name = StageName(options.stage);
+		std::vector<uint32_t> swap_storage;
+		const auto&           spirv = SwappedSpirv(stage_name, options.shader_hash, translated, swap_storage);
 		if (!ValidateShaderSpirv(options.dump_label, options.shader_hash, spirv)) {
 			DumpShaderSpirv(stage_name, options.shader_hash, spirv);
 			EXIT("%s failed hash=0x%016" PRIx64 ": SPIR-V validation failed\n", options.dump_label,

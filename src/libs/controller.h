@@ -86,6 +86,12 @@ void SetAxis(int id, Axis axis, int value);
 void SetRightStick(int id, int x, int y);
 void SetTouchPad(int id, int finger, bool down, float x, float y);
 void ResetInputState();
+// Input recording and replay (KYTY_INPUT_RECORD=<file>, KYTY_INPUT_REPLAY=<file>): F9 starts and
+// stops a recording of the pad state the game reads; a replay starts when the file named by
+// KYTY_INPUT_REPLAY_START appears next to the emulator (the harness drops it once the level has
+// loaded) or at once with KYTY_INPUT_REPLAY_START=now, and plays the recorded states back on the
+// recording's own clock, then hands control back to the live pad.
+void ToggleRecording();
 // Scripted input (live `pad`, automated tours): for `seconds` from now the game reads these stick values (0..255, 128
 // centre; -1: the host's) and these buttons OR-ed into the host's.
 void SetScriptedInput(int left_x, int left_y, int right_x, int right_y, uint32_t buttons, double seconds);

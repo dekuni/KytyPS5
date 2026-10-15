@@ -20,6 +20,7 @@
 #include "native-resource-state.h"
 
 #include <algorithm>
+#include <string_view>
 #include <array>
 #include <bit>
 #include <chrono>
@@ -38,11 +39,23 @@
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_image_granules_mode {0};
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_texture_resolve_pages_mode {0};
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_partial_image_dirty_mode {0};
+// The texture collector's critical level, live: 0 (default) 256 MiB under the card's budget as the system reports it
+// now, pressure 0.9 GiB under that; 1: the levels set at start (0.6 GB under a budget read then); more: that many MiB.
+// At the critical level the collector evicts what was idle 30 frames, so turning the camera evicted most textures and
+// brought them back: spinning at 1-1 (12 GB card, sparse BDA page table), 0.6 GB under the budget vs 0.25: 49.40 ->
+// 51.74 fps same-process, uploads 17 -> 10 MB a frame, frames over 50 ms halved, nothing placed in system memory.
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_texture_gc_critical_mb {0};
+// 1 (default): below the critical level the collector keeps textures that came back (Image::came_back) until they are
+// idle 600 frames: turning the camera brought evicted textures back within ~2 s (a full turn), each a full upload.
+// Spinning at 1-1, same process: uploads 10 -> 0.1 MB a frame, frames over 50 ms 9-17 -> 0-3 per 16 s, 1% low 13-17 ->
+// 21-31 fps, 49.99 -> 52.31 fps; nothing placed in system memory. 0: off (live, for A/Bs).
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_texture_came_back {1};
 // 1: a partial refresh uploads only the rows of tile blocks over the dirty ranges of a large
 // subresource, not the whole subresource (UploadImagePartial).
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_partial_row_bands_mode {0};
-// 0: a sampled view refreshes the whole texture, not only its levels (RefreshTextureLevels; on by default, 0 for an A/B).
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_texture_levels_mode {1};
+// 1: a sampled view refreshes only its levels of a streamed texture (RefreshTextureLevels). Off here (chen's default is
+// on): 1-1 arrival, 4 tours each (10-09), 1% low 24.1 -> 20.1, p99 31 -> 39 ms, fps 44.3 -> 42.6 with it; settled equal.
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_texture_levels_mode {0};
 // 0: an image GPU buffer writes covered parts of is uploaded whole, not only the subresources over them (InitializeImage;
 // on by default, 0 for an A/B).
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_buffer_ranges_mode {1};
@@ -222,6 +235,15 @@ void NameImageBinding(GraphicContext& graphics, Image& image, vk::ImageView view
 
 namespace {
 constexpr uint32_t ImageGranuleBits  = 16;
+// KYTY_GC_COLLECTOR=chen: his texture collector (10-09); otherwise ours (RunGarbageCollector).
+static bool ChenCollector() {
+	static const bool chen = [] {
+		const char* value = std::getenv("KYTY_GC_COLLECTOR");
+		return value != nullptr && std::string_view(value) == "chen";
+	}();
+	return chen;
+}
+
 constexpr uint64_t ImageGranuleSpace = uint64_t {1} << 40; // the image page table's address space
 } // namespace
 
@@ -268,9 +290,38 @@ TextureCache::TextureCache(GraphicContext& graphics, CommandScheduler& scheduler
 	LiveCounters::g_image_report = [](const char* path) {
 		if (g_report_cache != nullptr) g_report_cache->WriteReport(path);
 	};
-	// Collection starts where the video memory use reaches the budget less its headroom (GetTotalMemoryBudget):
-	// below it a kept image costs nothing, a deleted one an upload when the game uses it again.
-	m_trigger_gc_memory = m_graphics.GetTotalMemoryBudget();
+	// KYTY_GC_COLLECTOR=chen: his collector (10-09): collection starts where the video memory use reaches the budget
+	// less its headroom (GetTotalMemoryBudget): below it a kept image costs nothing, a deleted one an upload when the
+	// game uses it again. Otherwise ours (10-04: levels and idle ages, came-back textures kept).
+	if (ChenCollector()) {
+		m_trigger_gc_memory = m_graphics.GetTotalMemoryBudget();
+	} else {
+		// (Without VK_EXT_memory_budget the budget is VMA's estimate, 80% of the heap.)
+		constexpr int64_t GiB = 1024ll * 1024 * 1024;
+		const auto        budget =
+		    static_cast<int64_t>(std::min<uint64_t>(m_graphics.GetTotalMemoryBudget(), INT64_MAX));
+		// KYTY_GC_THRESHOLDS=old: his levels (pressure at budget - 4.8 GB: 5.5 GB on a 12 GB card, so
+		// the collector ran in its pressured mode for most of a session there, evicting and
+		// re-uploading). Otherwise the card may fill to 1.5 GB under its budget before the pressured
+		// mode and to 0.6 GB under it before the critical one (2026-10-04: no paging up to ~10.6-11 GB
+		// of 11.2 here, paging from 11.3; collecting from 9.3 GB churned ~50 buffers a second).
+		static const bool old_levels = [] {
+			const char* value = std::getenv("KYTY_GC_THRESHOLDS");
+			return value != nullptr && std::string_view(value) == "old";
+		}();
+		if (old_levels) {
+			const auto threshold = std::min<int64_t>(budget, 8 * GiB);
+			m_pressure_gc_memory = static_cast<uint64_t>(
+			    std::max<int64_t>(std::min(budget - 6 * threshold / 10, budget - GiB), GiB + GiB / 2));
+			m_critical_gc_memory = static_cast<uint64_t>(
+			    std::max<int64_t>(std::min(budget - 2 * threshold / 10, budget - GiB / 2), 3 * GiB));
+			m_trigger_gc_memory = static_cast<uint64_t>(std::max<int64_t>((budget - threshold) / 2, 0));
+		} else {
+			m_pressure_gc_memory = static_cast<uint64_t>(std::max<int64_t>(budget - 3 * GiB / 2, GiB));
+			m_critical_gc_memory = static_cast<uint64_t>(std::max<int64_t>(budget - 6 * GiB / 10, GiB + GiB / 2));
+			m_trigger_gc_memory  = static_cast<uint64_t>(std::max<int64_t>(budget - 5 * GiB / 2, GiB / 2));
+		}
+	}
 }
 
 void KytyTextureGcThresholds(uint64_t total_budget, uint64_t& trigger, uint64_t& pressure, uint64_t& critical) {
@@ -451,7 +502,11 @@ void TextureCache::RegisterImage(ImageId id) {
 	image.registered = true;
 	++image.registrations;
 	image.lru_id     = m_lru_cache.Insert(id, m_gc_tick);
+	if (TakeCollected(image.info.data.address, image.info.data.End())) image.came_back = true;
 	m_total_used_memory += image.AccountedSize();
+	m_accounted_bytes += image.AccountedSize();
+	++m_accounted_images;
+	++m_registrations;
 }
 
 void TextureCache::UnregisterImage(ImageId id) {
@@ -486,6 +541,8 @@ void TextureCache::UnregisterImage(ImageId id) {
 		EXIT("TextureCache: image accounting underflow\n");
 	}
 	m_total_used_memory -= accounted;
+	m_accounted_bytes -= accounted;
+	--m_accounted_images;
 	image.registered = false;
 }
 
@@ -551,9 +608,16 @@ void TextureCache::RetireImage(ImageId id) {
 	}
 }
 
+// KYTY_FREE_LOG: a line for every image the cache deletes, any size (FREE <site>, UNMAP-DELETE, GC-DELETE), to tell
+// why textures are created again.
+static bool FreeLogAll() {
+	static const bool all = std::getenv("KYTY_FREE_LOG") != nullptr;
+	return all;
+}
+
 [[gnu::noinline]] void TextureCache::FreeImage(ImageId id, const char* site) {
 	auto& image = m_slot_images[id];
-	if (SlowLog::Threshold() > 0.0 && image.info.data.size >= PartialDirtyMinSize) {
+	if ((SlowLog::Threshold() > 0.0 && image.info.data.size >= PartialDirtyMinSize) || FreeLogAll()) {
 		std::printf("[tsc %llu] FREE %s addr=0x%llx size=0x%llx fmt=%u %ux%u layers=%u levels=%u tile=%u target=%d "
 		            "gpu=%d\n",
 		            static_cast<unsigned long long>(__rdtsc()), site,
@@ -4073,8 +4137,68 @@ void TextureCache::UnmapMemory(uint64_t address, uint64_t size) {
 		if (owner->IsGpuModified()) {
 			owner->ClearGpuModified();
 		}
+		if (FreeLogAll()) {
+			std::printf("[tsc %llu] UNMAP-DELETE addr=0x%llx size=0x%llx unmap=0x%llx+0x%llx\n",
+			            static_cast<unsigned long long>(__rdtsc()),
+			            static_cast<unsigned long long>(owner->info.data.address),
+			            static_cast<unsigned long long>(owner->info.data.size), static_cast<unsigned long long>(address),
+			            static_cast<unsigned long long>(size));
+		}
 		DeleteImage(id);
 	}
+}
+
+// The registered images by class (extent, format, mips, layers, samples): the twelve largest by
+// bytes, every minute with the inventory. Tells render targets from streamed textures.
+void TextureCache::LogImageClasses() const {
+	struct Class {
+		uint64_t bytes = 0, count = 0;
+	};
+	std::unordered_map<uint64_t, Class> classes;
+	std::unordered_map<uint64_t, const Image*> examples;
+	m_slot_images.ForEach([&](ImageId, const Image& image) {
+		if (!image.registered || image.backing.image == nullptr) return;
+		const auto& i   = image.info;
+		const uint64_t key = (static_cast<uint64_t>(i.extent.width) << 48u) ^ (static_cast<uint64_t>(i.extent.height) << 32u) ^
+		                     (static_cast<uint64_t>(static_cast<uint32_t>(i.pixel_format)) << 16u) ^
+		                     (static_cast<uint64_t>(i.resources.levels) << 8u) ^ (static_cast<uint64_t>(i.resources.layers) << 2u) ^
+		                     i.samples;
+		auto& c = classes[key];
+		c.bytes += image.AccountedSize();
+		c.count += 1;
+		examples.try_emplace(key, &image);
+	});
+	std::vector<std::pair<uint64_t, Class>> sorted(classes.begin(), classes.end());
+	std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.second.bytes > b.second.bytes; });
+	std::string line = "Image classes:";
+	for (size_t n = 0; n < sorted.size() && n < 12; ++n) {
+		const auto& i = examples[sorted[n].first]->info;
+		line += fmt::format(" {}x{}x{} fmt{} m{} l{}{}: {} MiB ({});", i.extent.width, i.extent.height, i.extent.depth,
+		                    static_cast<uint32_t>(i.pixel_format), i.resources.levels, i.resources.layers,
+		                    i.samples > 1 ? fmt::format(" s{}", i.samples) : "", sorted[n].second.bytes >> 20u,
+		                    sorted[n].second.count);
+	}
+	LOGF("%s\n", line.c_str());
+}
+
+// Whether the collector evicted part of [begin, end) under pressure within 600 frames (those ranges are forgotten here):
+// an image registered over them came back.
+bool TextureCache::TakeCollected(uint64_t begin, uint64_t end) {
+	if (m_collected.empty()) return false;
+	if (m_collected.size() > 8192)
+		std::erase_if(m_collected, [&](const auto& entry) { return m_gc_tick - entry.second.second > 600; });
+	bool came_back = false;
+	auto it        = m_collected.lower_bound(begin);
+	if (it != m_collected.begin() && std::prev(it)->second.first > begin) --it;
+	while (it != m_collected.end() && it->first < end) {
+		if (it->second.first > begin) {
+			came_back |= m_gc_tick - it->second.second <= 600;
+			it = m_collected.erase(it);
+		} else {
+			++it;
+		}
+	}
+	return came_back;
 }
 
 void TextureCache::EraseRetired() {
@@ -4120,6 +4244,7 @@ void TextureCache::RunGarbageCollector() {
 	EraseRetired();
 	std::scoped_lock lock {m_lock};
 	const uint64_t   tick = m_gc_tick++;
+	++m_collections;
 	// Parked images not taken back since the flip before: the game left that use of the memory.
 	std::erase_if(m_parked, [&](const auto& item) {
 		if (item.second.tick + 1 >= tick) return false;
@@ -4151,6 +4276,31 @@ void TextureCache::RunGarbageCollector() {
 			m_trigger_gc_memory = trigger;
 		}
 	}
+	// Video memory inventory, every ten seconds in the file log: what the process holds (the
+	// collectors see only the device total, so a card at its limit shows here, not in any error).
+	if (const auto now = std::chrono::steady_clock::now(); now - m_inventory_logged >= std::chrono::seconds(10)) {
+		m_inventory_logged = now;
+		static uint64_t last_registrations = 0, last_deletions = 0, last_buffer_registrations = 0, last_buffer_deletions = 0,
+		                last_collections = 0;
+		LOGF("Video memory: %s; collections %llu; images %llu MiB (%llu, +%llu -%llu, kept tiled %llu, unsafe evicted %llu, nodl %llu), buffers %llu MiB (%llu, +%llu -%llu); image GC trigger/pressure/critical %llu/%llu/%llu MiB, buffer GC trigger/critical %llu/%llu MiB\n",
+		     m_graphics.VideoMemoryLine().c_str(),
+		     static_cast<unsigned long long>(m_collections - std::exchange(last_collections, m_collections)),
+		     static_cast<unsigned long long>(m_accounted_bytes >> 20u),
+		     static_cast<unsigned long long>(m_accounted_images),
+		     static_cast<unsigned long long>(m_registrations - std::exchange(last_registrations, m_registrations)),
+		     static_cast<unsigned long long>(m_gc_deletions - std::exchange(last_deletions, m_gc_deletions)),
+		     static_cast<unsigned long long>(m_gc_skipped_tiled), static_cast<unsigned long long>(m_gc_skipped_unsafe),
+		     static_cast<unsigned long long>(m_gc_skipped_download),
+		     static_cast<unsigned long long>(m_buffer_cache.AccountedBytes() >> 20u),
+		     static_cast<unsigned long long>(m_buffer_cache.AccountedBuffers()),
+		     static_cast<unsigned long long>(m_buffer_cache.Registrations() - std::exchange(last_buffer_registrations, m_buffer_cache.Registrations())),
+		     static_cast<unsigned long long>(m_buffer_cache.GcDeletions() - std::exchange(last_buffer_deletions, m_buffer_cache.GcDeletions())),
+		     static_cast<unsigned long long>(m_trigger_gc_memory >> 20u), static_cast<unsigned long long>(m_pressure_gc_memory >> 20u),
+		     static_cast<unsigned long long>(m_critical_gc_memory >> 20u),
+		     static_cast<unsigned long long>(m_buffer_cache.TriggerGcMemory() >> 20u),
+		     static_cast<unsigned long long>(m_buffer_cache.CriticalGcMemory() >> 20u));
+		if (++m_inventory_count % 6 == 1) LogImageClasses();
+	}
 	// A log line on where the GPU's memory goes when its use moved (checked every 60 flips): on a GPU short of video
 	// memory by 256 MiB of video memory, on others by 1 GiB of video or GPU system memory (issue #14: an RX 9070 XT held
 	// 16 GB of the game's GPU memory in system memory with video memory to spare, and nothing in its log said when).
@@ -4166,6 +4316,112 @@ void TextureCache::RunGarbageCollector() {
 			std::snprintf(label, sizeof(label), "flip %llu", static_cast<unsigned long long>(tick));
 			m_graphics.LogVideoMemory(label);
 		}
+	}
+	if (!ChenCollector()) {
+		if (m_total_used_memory < m_trigger_gc_memory) {
+			return;
+		}
+		const auto     critical_mb = kyty_local_texture_gc_critical_mb.load(std::memory_order_relaxed);
+		const uint64_t device_budget = critical_mb == 0 ? m_graphics.GetDeviceMemoryBudget() : 0;
+		const uint64_t live_critical = critical_mb == 0   ? (device_budget > (uint64_t {2} << 30u) ? device_budget - (uint64_t {256} << 20u) : 0)
+		                               : critical_mb == 1 ? 0
+		                                                  : uint64_t {critical_mb} << 20u;
+		const uint64_t critical_level = live_critical != 0 ? std::max(live_critical, m_critical_gc_memory) : m_critical_gc_memory;
+		const uint64_t pressure_level =
+		    live_critical != 0 ? std::max(critical_level - std::min<uint64_t>(critical_level, uint64_t {900} << 20u), m_pressure_gc_memory)
+		                       : m_pressure_gc_memory;
+		const auto collect = [&](bool allow_aggressive) {
+			bool           pressured  = m_total_used_memory >= pressure_level;
+			bool           aggressive = allow_aggressive && m_total_used_memory >= critical_level;
+			// The idle age an image must have reached to go, in frames: the shorter the fuller the card.
+			// His ages went the other way (16 frames idle in normal mode, 160 in critical), so at the
+			// card's limit, where new areas keep everything recent, nothing qualified and the card paged
+			// (2026-10-04: 11.9 GB used of an 11.3 GB budget). KYTY_GC_AGES=old restores them.
+			static const bool old_ages = [] {
+				const char* value = std::getenv("KYTY_GC_AGES");
+				return value != nullptr && std::string_view(value) == "old";
+			}();
+			// Above the trigger alone (most of a play session, the trigger is ~1.5 GB) an image goes only
+			// after 15 s idle: evicting what the player turned away from a second ago is churn (the
+			// re-upload hitches), not freed memory the card needed.
+			const uint64_t age       = std::min<uint64_t>(old_ages ? (aggressive ? 160 : pressured ? 80 : 16)
+			                                                       : (aggressive ? 30 : pressured ? 90 : 600), tick);
+			size_t         deletions = aggressive ? 80 : pressured ? 20 : 10;
+			// A candidate the pass cannot evict (GPU-written and tiled, or not safe to download) does not
+			// use up the pass: it is touched so the next passes look past it, and the pass scans up to
+			// four candidates per deletion. Before, the oldest un-evictable images were the whole
+			// candidate list of every pass, and the collector freed nothing at the card's limit.
+			std::vector<ImageId> candidates;
+			candidates.reserve(deletions * 4);
+			// Deleting depth recursively deletes its stencil association, so finish LRU traversal
+			// first.
+			// (Textures that came back are the working set: below the critical level they stay until idle 600 frames.)
+			const bool keep_came_back = !aggressive && kyty_local_texture_came_back.load(std::memory_order_relaxed) != 0;
+			m_lru_cache.ForEachItemBelow(tick - age, [&](ImageId id, uint64_t last_used) {
+				if (keep_came_back && tick - last_used < 600) {
+					const auto* image = m_slot_images.try_get(id);
+					if (image != nullptr && image->came_back) return false;
+				}
+				candidates.push_back(id);
+				return candidates.size() == deletions * 4;
+			});
+			for (const auto id: candidates) {
+				if (deletions == 0) {
+					break;
+				}
+				auto owner = m_slot_images.try_get(id);
+				if (owner == nullptr || !owner->registered || owner->depth_id) {
+					continue;
+				}
+				if (owner->IsGpuModified()) {
+					// Not safe to download = CPU-dirty or rewritten as a buffer: the guest memory holds the newer
+					// bytes, so the image goes without a download (his rule). Safe ones need the download first:
+					// tiled ones cannot have it, untiled ones only under pressure.
+					const bool safe = SafeToDownload(*owner);
+					if (safe && owner->info.IsTiled()) {
+						++m_gc_skipped_tiled;
+						m_lru_cache.Touch(owner->lru_id, tick);
+						continue;
+					}
+					if (safe && !pressured) {
+						continue;
+					}
+					if (safe && !TryDownloadImage(id)) {
+						++m_gc_skipped_download;
+						m_lru_cache.Touch(owner->lru_id, tick);
+						continue;
+					}
+					if (!safe) ++m_gc_skipped_unsafe; // counted: evicted without a download
+					owner->ClearGpuModified();
+				}
+				--deletions;
+				if ((SlowLog::Threshold() > 0.0 && owner->info.data.size >= PartialDirtyMinSize) || FreeLogAll()) {
+					std::printf("[tsc %llu] GC-DELETE addr=0x%llx size=0x%llx used=%llu\n",
+					            static_cast<unsigned long long>(__rdtsc()),
+					            static_cast<unsigned long long>(owner->info.data.address),
+					            static_cast<unsigned long long>(owner->info.data.size),
+					            static_cast<unsigned long long>(m_total_used_memory));
+					std::fflush(stdout);
+				}
+				if (pressured || aggressive) m_collected[owner->info.data.address] = {owner->info.data.End(), tick};
+				DeleteImage(id);
+				++m_gc_deletions;
+				LiveCounters::Add(LiveCounters::GcImageDeletes);
+				if (m_total_used_memory < critical_level && aggressive) {
+					deletions >>= 2;
+					aggressive = false;
+				}
+				if (m_total_used_memory < pressure_level && pressured) {
+					deletions >>= 1;
+					pressured = false;
+				}
+			}
+		};
+		collect(false);
+		if (m_total_used_memory >= critical_level) {
+			collect(true);
+		}
+		return;
 	}
 	// Over the budget: the images no draw or dispatch used for StaleTicks flips (~10 s), least recently used first, at
 	// most MaxDeletions a flip. What the game stops drawing it stops binding: 1-1 standing, 3.2 GiB of images were used
@@ -4214,6 +4470,7 @@ void TextureCache::RunGarbageCollector() {
 			std::fflush(stdout);
 		}
 		DeleteImage(id);
+		++m_gc_deletions;
 		LiveCounters::Add(LiveCounters::GcImageDeletes);
 	}
 }

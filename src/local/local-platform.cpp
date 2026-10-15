@@ -45,6 +45,7 @@
 #include <sched.h>
 #include <string>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #endif
@@ -52,14 +53,22 @@
 namespace LocalPlatform {
 
 // "1,2,3" -> bit mask of CPUs 0..63; 0 for an empty or invalid list.
+// "1,2,3,6,7", and ranges: "0-15,20" (a lone "0-15" used to read as CPU 0: the game on one core).
 static uint64_t CpuListMask(const char* list) {
 	uint64_t mask = 0;
 	if (list == nullptr) return 0;
 	for (const char* p = list; *p != '\0';) {
-		char*      end = nullptr;
-		const long cpu = std::strtol(p, &end, 10);
+		char*      end   = nullptr;
+		const long first = std::strtol(p, &end, 10);
 		if (end == p) break;
-		if (cpu >= 0 && cpu < 64) mask |= uint64_t(1) << cpu;
+		long last = first;
+		if (*end == '-') {
+			char* range_end = nullptr;
+			last            = std::strtol(end + 1, &range_end, 10);
+			if (range_end == end + 1) break;
+			end = range_end;
+		}
+		for (long cpu = std::max(first, 0L); cpu <= last && cpu < 64; ++cpu) mask |= uint64_t(1) << cpu;
 		p = (*end == ',') ? end + 1 : end;
 	}
 	return mask;
@@ -162,15 +171,14 @@ bool PinThreadHandleToCpuList(uint64_t handle, const char* list) {
 	       SetThreadAffinityMask(reinterpret_cast<HANDLE>(handle), DWORD_PTR(mask)) != 0;
 }
 
-// CPU set ids of the logical processors in the mask (all of them for mask 0 = no restriction).
-static bool SetProcessDefaultCpuMask(uint64_t mask) {
-	if (mask == 0) return SetProcessDefaultCpuSets(GetCurrentProcess(), nullptr, 0) != 0;
-	ULONG length = 0;
+// CPU set ids of the logical processors in the mask.
+static std::vector<ULONG> CpuSetIds(uint64_t mask) {
+	std::vector<ULONG> ids;
+	ULONG              length = 0;
 	(void)GetSystemCpuSetInformation(nullptr, 0, &length, GetCurrentProcess(), 0);
 	std::vector<uint8_t> buffer(length);
 	auto* first = reinterpret_cast<SYSTEM_CPU_SET_INFORMATION*>(buffer.data());
-	if (length == 0 || !GetSystemCpuSetInformation(first, length, &length, GetCurrentProcess(), 0)) return false;
-	std::vector<ULONG> ids;
+	if (length == 0 || !GetSystemCpuSetInformation(first, length, &length, GetCurrentProcess(), 0)) return ids;
 	for (ULONG offset = 0; offset < length;) {
 		const auto* info = reinterpret_cast<const SYSTEM_CPU_SET_INFORMATION*>(buffer.data() + offset);
 		if (info->Type == CpuSetInformation && info->CpuSet.Group == 0 && info->CpuSet.LogicalProcessorIndex < 64 &&
@@ -178,6 +186,13 @@ static bool SetProcessDefaultCpuMask(uint64_t mask) {
 			ids.push_back(info->CpuSet.Id);
 		offset += info->Size;
 	}
+	return ids;
+}
+
+// The default CPU sets of the process's threads (all of them for mask 0 = no restriction).
+static bool SetProcessDefaultCpuMask(uint64_t mask) {
+	if (mask == 0) return SetProcessDefaultCpuSets(GetCurrentProcess(), nullptr, 0) != 0;
+	const auto ids = CpuSetIds(mask);
 	return !ids.empty() && SetProcessDefaultCpuSets(GetCurrentProcess(), ids.data(), static_cast<ULONG>(ids.size())) != 0;
 }
 
@@ -661,11 +676,34 @@ bool CurrentThreadStack(uint64_t* low, uint64_t* high) {
 	return stack_high > stack_low;
 }
 
+bool RaiseThreadPriority() {
+	return SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) != 0;
+}
+
+bool SetThreadHandlePriority(uint64_t handle, int priority) {
+	return handle != 0 && SetThreadPriority(reinterpret_cast<HANDLE>(handle), priority) != 0;
+}
+
 void AvoidCpuList(const char* avoid_cpus) {
 	DWORD_PTR process = 0, system = 0;
-	if (const auto avoid = static_cast<DWORD_PTR>(CpuListMask(avoid_cpus));
-	    avoid != 0 && GetProcessAffinityMask(GetCurrentProcess(), &process, &system) != 0 && (process & ~avoid) != 0)
-		(void)SetThreadAffinityMask(GetCurrentThread(), process & ~avoid);
+	if (GetProcessAffinityMask(GetCurrentProcess(), &process, &system) == 0) return;
+	// KYTY_BACKGROUND_CPUS (e.g. the E-cores "16-23"): where background work goes when the process
+	// may run there; these threads also leave the process's default CPU sets (KYTY_PROCESS_CPUS, the
+	// game's cores) for their own.
+	static const uint64_t background = [] {
+		const char* list = std::getenv("KYTY_BACKGROUND_CPUS");
+		return list != nullptr ? CpuListMask(list) : uint64_t {0};
+	}();
+	uint64_t mask = 0;
+	if (background != 0 && (process & background) != 0) {
+		mask = process & background;
+	} else if (const auto avoid = static_cast<DWORD_PTR>(CpuListMask(avoid_cpus)); avoid != 0 && (process & ~avoid) != 0) {
+		mask = process & ~avoid;
+	}
+	if (mask == 0) return;
+	(void)SetThreadAffinityMask(GetCurrentThread(), static_cast<DWORD_PTR>(mask));
+	if (const auto ids = CpuSetIds(mask); !ids.empty())
+		(void)SetThreadSelectedCpuSets(GetCurrentThread(), ids.data(), static_cast<ULONG>(ids.size()));
 }
 
 void MakeBackgroundThread(const char* avoid_cpus) {
@@ -724,6 +762,27 @@ uint64_t OpenFileForReading(const char* path) {
 	HANDLE file = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
 	                          FILE_FLAG_RANDOM_ACCESS, nullptr);
 	return file == INVALID_HANDLE_VALUE ? 0 : reinterpret_cast<uint64_t>(file);
+}
+
+uint64_t OpenFileForWriting(const char* path, bool truncate) {
+	wchar_t wide[MAX_PATH * 2] {};
+	if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, MAX_PATH * 2) == 0) return 0;
+	HANDLE file = CreateFileW(wide, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+	                          truncate ? CREATE_ALWAYS : OPEN_ALWAYS, FILE_FLAG_RANDOM_ACCESS, nullptr);
+	return file == INVALID_HANDLE_VALUE ? 0 : reinterpret_cast<uint64_t>(file);
+}
+
+bool TruncateFile(uint64_t file, uint64_t size) {
+	LARGE_INTEGER at {};
+	at.QuadPart = static_cast<LONGLONG>(size);
+	return file != 0 && SetFilePointerEx(reinterpret_cast<HANDLE>(file), at, nullptr, FILE_BEGIN) != 0 &&
+	       SetEndOfFile(reinterpret_cast<HANDLE>(file)) != 0;
+}
+
+uint64_t FileSize(uint64_t file) {
+	LARGE_INTEGER size {};
+	return file != 0 && GetFileSizeEx(reinterpret_cast<HANDLE>(file), &size) != 0 ? static_cast<uint64_t>(size.QuadPart)
+	                                                                               : 0;
 }
 
 bool WriteHeapHistogram(const char* path) {
@@ -1408,6 +1467,14 @@ bool CurrentThreadStack(uint64_t* low, uint64_t* high) {
 	return found;
 }
 
+bool RaiseThreadPriority() {
+	return setpriority(PRIO_PROCESS, static_cast<id_t>(ThreadId()), -5) == 0;
+}
+
+bool SetThreadHandlePriority(uint64_t, int) {
+	return false;
+}
+
 void AvoidCpuList(const char* avoid_cpus) {
 	cpu_set_t set;
 	if (const auto avoid = CpuListMask(avoid_cpus); avoid != 0 && sched_getaffinity(0, sizeof(set), &set) == 0) {
@@ -1463,6 +1530,20 @@ void CloseScratchFile(uint64_t file) {
 uint64_t OpenFileForReading(const char* path) {
 	const int fd = open(path, O_RDONLY | O_CLOEXEC);
 	return fd < 0 ? 0 : static_cast<uint64_t>(fd) + 1;
+}
+
+uint64_t OpenFileForWriting(const char* path, bool truncate) {
+	const int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC | (truncate ? O_TRUNC : 0), 0644);
+	return fd < 0 ? 0 : static_cast<uint64_t>(fd) + 1;
+}
+
+bool TruncateFile(uint64_t file, uint64_t size) {
+	return file != 0 && ftruncate(static_cast<int>(file - 1), static_cast<off_t>(size)) == 0;
+}
+
+uint64_t FileSize(uint64_t file) {
+	struct stat info {};
+	return file != 0 && fstat(static_cast<int>(file - 1), &info) == 0 ? static_cast<uint64_t>(info.st_size) : 0;
 }
 
 bool WriteHeapHistogram(const char*) {

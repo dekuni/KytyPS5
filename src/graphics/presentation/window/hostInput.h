@@ -8,6 +8,8 @@ union SDL_Event;
 namespace Libs::Graphics {
 
 void               HostInputInit();
+// Every presented frame (the window title's counter): the scripted input watches the frame rate.
+void               HostInputNotePresentedFrame();
 void               HostInputKey(int key_code, bool down);
 void               HostInputMouseButton(uint8_t mouse_button, bool down);
 void               HostInputToggleMouseToJoystick();

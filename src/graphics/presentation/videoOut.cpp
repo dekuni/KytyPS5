@@ -1163,7 +1163,17 @@ bool FlipQueue::Flip(uint32_t micros) {
 	// next flip under it. The presented frame is its own copy; a port closed meanwhile takes no status or event.
 	r.cfg->mutex.Unlock();
 
+	// KYTY_FLIP_PRESENT_UNLOCKED=1: the port's lock is released while the frame is presented. The GPU
+	// thread reserves the next flip under it (ReserveFlipRequest) and the game reads the flip status
+	// under it: both waited out the whole present. A Close meanwhile waits in Cancel for this request
+	// (m_processing), and events of a closed port's generation are not triggered.
+	static const bool unlocked_present = [] {
+		const char* value = std::getenv("KYTY_FLIP_PRESENT_UNLOCKED");
+		return value != nullptr && value[0] == '1';
+	}();
+	if (unlocked_present) r.cfg->mutex.Unlock();
 	m_presenter.Present(*r.frame);
+	if (unlocked_present) r.cfg->mutex.Lock();
 
 	r.cfg->mutex.Lock();
 	m_mutex.Lock();

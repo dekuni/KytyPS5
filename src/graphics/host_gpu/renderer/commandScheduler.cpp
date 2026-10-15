@@ -6,6 +6,7 @@
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/regionManager.h"
 #include "async-upload.h"
+#include "causal-probe.h"
 #ifdef KYTY_LOCAL_VULKAN_RECORDING
 #include "vulkan-recording.h"
 #include "device-fault.h"
@@ -223,6 +224,7 @@ void CommandScheduler::CompleteDispatch() {
 // translated. Whole, the GPU idled through its translation (3-4.5 ms for the big passes) and ran it after, late into the
 // next frame, where the next frame's culling readbacks waited for it.
 void CommandScheduler::CompleteDraws(uint32_t draws) {
+	CausalProbe::At(CausalProbe::Draw, draws);
 	const auto batch = kyty_local_draw_batch.load(std::memory_order_relaxed);
 	if (t_recorder != nullptr || batch == 0 || (m_recorded_draws += draws) < batch) {
 		return;

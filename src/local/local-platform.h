@@ -60,6 +60,10 @@ bool FlushProcessWriteBuffers();
 // below-normal priority too: background work that must not hold up the game's threads.
 void AvoidCpuList(const char* avoid_cpus);
 void MakeBackgroundThread(const char* avoid_cpus);
+// The calling thread one priority level above normal work (Windows: THREAD_PRIORITY_HIGHEST).
+bool RaiseThreadPriority();
+// Another thread's priority by handle (CurrentThreadHandle): Windows THREAD_PRIORITY_* values (0 normal, 2 highest).
+bool SetThreadHandlePriority(uint64_t handle, int priority);
 // The calling thread above the normal priority of the game's threads (Windows: THREAD_PRIORITY_HIGHEST; Linux:
 // unchanged): the render thread, which every frame waits for, is not time-sliced against them on its CPUs.
 void MakeCriticalThread();
@@ -73,6 +77,13 @@ bool     ReadScratchFile(uint64_t file, uint64_t offset, void* data, size_t size
 void     CloseScratchFile(uint64_t file);
 // An existing file (a UTF-8 path) for ReadScratchFile and CloseScratchFile; 0 when it cannot be opened.
 uint64_t OpenFileForReading(const char* path);
+// A file kept between runs (a UTF-8 path) for WriteScratchFile, ReadScratchFile and CloseScratchFile,
+// made when missing, emptied first with `truncate`; 0 when it cannot be opened.
+uint64_t OpenFileForWriting(const char* path, bool truncate);
+// The size of a file one of the above opened (0 on failure).
+uint64_t FileSize(uint64_t file);
+// Cuts a file OpenFileForWriting opened to `size` bytes.
+bool TruncateFile(uint64_t file, uint64_t size);
 
 // The process's committed private memory and resident working set, and the machine's physical memory, in
 // bytes (0 where the host cannot tell; KYTY_SIMULATE_RAM_MB=<n> reports n MiB of physical memory, for tests).

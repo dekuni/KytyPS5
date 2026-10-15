@@ -23,9 +23,11 @@
 #include "frame-capture.h"
 #include "live-census.h"
 #include "live-counters.h"
+#include "live-shot.h"
 #include "live-trace.h"
 #include "libs/controller.h"
 #include "loader/demonsSoulsWarp.h"
+#include "kernel/pthread.h"
 #include "local-platform.h"
 #include "perf-overlay.h"
 #include "slow-log.h"
@@ -429,9 +431,15 @@ inline void Run(uint64_t id, const std::string& line) {
 			LiveTrace::g_read_marks(std::min(LiveTrace::g_mark_next.load(), LiveTrace::MarkSlots));
 		LiveTrace::Dump(arg2);
 		const double seconds = std::chrono::duration<double>(clock1 - clock0).count();
-		std::printf("LIVE_TRACE id=%" PRIu64 " records=%" PRIu64 " tsc_hz=%.0f path=%s\n", id,
+		uint64_t trace_base = 0;
+		char     trace_exe[512] {};
+#if defined(_WIN32)
+		if (!LocalPlatform::ModuleOf(reinterpret_cast<const void*>(&Flip), &trace_base, trace_exe, sizeof(trace_exe)))
+			trace_exe[0] = '\0';
+#endif
+		std::printf("LIVE_TRACE id=%" PRIu64 " records=%" PRIu64 " tsc_hz=%.0f path=%s base=%016" PRIx64 " exe=%s\n", id,
 		            std::min<uint64_t>(LiveTrace::g_count.load(), LiveTrace::Capacity),
-		            static_cast<double>(tsc1 - tsc0) / seconds, arg2);
+		            static_cast<double>(tsc1 - tsc0) / seconds, arg2, trace_base, trace_exe[0] != '\0' ? trace_exe : "?");
 	} else if (cmd == "census" && n >= 2) {
 		// census <seconds>: render-thread time per call kind and shader over the window.
 		LiveCensus::g_on.store(false);
@@ -539,6 +547,12 @@ inline void Run(uint64_t id, const std::string& line) {
 				std::printf("LIVE_PM4 id=%" PRIu64 " opcode=0x%02zx per_frame=%.2f\n", id, i,
 				            static_cast<double>(count) / static_cast<double>(frames));
 		}
+	} else if (cmd == "prio" && n >= 3) {
+		// prio <gpu 0|1|2> <band old|low>: the GPU thread's priority (Windows THREAD_PRIORITY_* value) and
+		// the guest priority band (upstream #1050) at run time, for paired A/B in one session.
+		const bool gpu  = LocalPlatform::SetThreadHandlePriority(g_render_thread, std::atoi(arg1));
+		const int  band = Libs::LibKernel::PthreadApplyGuestPriorityBand(std::string_view(arg2) == "low");
+		std::printf("LIVE_PRIO id=%" PRIu64 " gpu=%s(%d) band=%s threads=%d\n", id, arg1, gpu ? 1 : 0, arg2, band);
 	} else if (cmd == "pin" && n >= 2) {
 		// pin <cpus>: the render thread's affinity (for same-process placement A/B).
 		const bool ok = LocalPlatform::PinThreadHandleToCpuList(g_render_thread, arg1);
@@ -554,6 +568,9 @@ inline void Run(uint64_t id, const std::string& line) {
 		const int result = __llvm_profile_write_file();
 		std::printf("LIVE_PGO id=%" PRIu64 " path=%s result=%d\n", id, arg1, result);
 #endif
+	} else if (cmd == "shot" && n >= 2) {
+		// shot <path>: the next presented frame as a BMP (live-shot.h); LIVE_SHOT once written.
+		LiveShot::Request(id, arg1);
 	} else if (cmd == "vma" && n >= 2) {
 		// vma <path>: the GPU allocator's detailed statistics (JSON: every allocation's type and size).
 		if (LiveCounters::g_vma_report != nullptr) LiveCounters::g_vma_report(arg1);

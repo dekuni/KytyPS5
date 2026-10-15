@@ -398,6 +398,9 @@ public:
 	mutable std::atomic<bool> state_busy {false};
 	// RegisterImage calls on this object: a proof names one registration.
 	uint32_t         registrations      = 0;
+	// The texture collector evicted an image over this memory under pressure and it was registered again soon after
+	// (TextureCache::RunGarbageCollector): part of the working set.
+	bool             came_back          = false;
 	// TextureCache::ViewLevelBytes's last answer: the view's levels (base | count << 8; UINT32_MAX: none yet) and their
 	// bytes [level_begin, level_end) (level_end 0: the view needs the whole image).
 	mutable uint32_t level_view         = UINT32_MAX;

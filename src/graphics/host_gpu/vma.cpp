@@ -32,6 +32,8 @@
 
 #include <algorithm>
 #include <cinttypes>
+#include <fmt/format.h>
+#include <string>
 
 namespace Libs::Graphics {
 
@@ -239,6 +241,26 @@ uint64_t GraphicContext::GetDeviceMemoryUsage() const {
 	return usage - std::min(usage, simulation_ballast_bytes);
 }
 
+uint64_t GraphicContext::GetDeviceMemoryBudget() const {
+	if (!CanReportMemoryUsage() || allocator == nullptr) {
+		return 0;
+	}
+	VmaBudget budgets[VK_MAX_MEMORY_HEAPS] {};
+	vmaGetHeapBudgets(allocator, budgets);
+	const bool discrete =
+	    physical_device_properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu;
+	uint64_t budget = 0;
+	for (uint32_t heap = 0; heap < physical_device_memory_properties.memoryHeapCount; heap++) {
+		const bool device_local =
+		    static_cast<bool>(physical_device_memory_properties.memoryHeaps[heap].flags &
+		                      vk::MemoryHeapFlagBits::eDeviceLocal);
+		if (!discrete || device_local) {
+			budget += budgets[heap].budget;
+		}
+	}
+	return budget;
+}
+
 uint64_t GraphicContext::GetTotalMemoryBudget() const {
 	if (allocator == nullptr) {
 		return 0;
@@ -265,8 +287,18 @@ uint64_t GraphicContext::GetTotalMemoryBudget() const {
 	budget -= std::min(budget, simulation_ballast_bytes);
 	usage -= std::min(usage, simulation_ballast_bytes);
 	local -= std::min(local, simulation_ballast_bytes);
+	// KYTY_VRAM_RESERVE_MB=<n>: video memory the caches leave to others (frame generation's
+	// contexts and swapchain, which allocate outside the caches after their budgets are set).
+	// Negative: the caches may go that much closer to the card's budget (they otherwise settle
+	// about 1.5 GB under it: the eighth kept here plus the collectors' own margins).
+	static const int64_t reserve = [] {
+		const char* text = std::getenv("KYTY_VRAM_RESERVE_MB");
+		return text != nullptr ? static_cast<int64_t>(std::strtoll(text, nullptr, 10)) << 20 : int64_t {0};
+	}();
 	if (discrete) {
-		return budget - std::min<uint64_t>(budget / 8, 1024ull * 1024 * 1024);
+		const auto usable = static_cast<int64_t>(budget - std::min<uint64_t>(budget / 8, 1024ull * 1024 * 1024));
+		const auto with   = std::clamp<int64_t>(usable - reserve, usable / 2, static_cast<int64_t>(budget));
+		return static_cast<uint64_t>(with);
 	}
 	constexpr uint64_t system_reserve = 8ull * 1024 * 1024 * 1024;
 	const auto         available      = budget > usage ? budget - usage : uint64_t {0};
@@ -340,6 +372,42 @@ void GraphicContext::ReportMemoryFallback(const char* what, uint64_t bytes) cons
 		            budgets[i].budget >> 20u);
 	}
 	std::fflush(stdout);
+}
+
+std::string GraphicContext::VideoMemoryLine() const {
+	if (allocator == nullptr) return "no allocator";
+	VmaBudget budgets[VK_MAX_MEMORY_HEAPS] {};
+	vmaGetHeapBudgets(allocator, budgets);
+	uint64_t heap_usage = 0, heap_budget = 0;
+	for (uint32_t heap = 0; heap < physical_device_memory_properties.memoryHeapCount; heap++) {
+		if (physical_device_memory_properties.memoryHeaps[heap].flags & vk::MemoryHeapFlagBits::eDeviceLocal) {
+			heap_usage += budgets[heap].usage;
+			heap_budget += budgets[heap].budget;
+		}
+	}
+	VmaTotalStatistics stats {};
+	vmaCalculateStatistics(allocator, &stats);
+	uint64_t local_bytes = 0, local_count = 0, host_bytes = 0, host_count = 0;
+	for (uint32_t type = 0; type < physical_device_memory_properties.memoryTypeCount; type++) {
+		const auto& s    = stats.memoryType[type].statistics;
+		const auto  heap = physical_device_memory_properties.memoryTypes[type].heapIndex;
+		if (physical_device_memory_properties.memoryHeaps[heap].flags & vk::MemoryHeapFlagBits::eDeviceLocal) {
+			local_bytes += s.allocationBytes;
+			local_count += s.allocationCount;
+		} else {
+			host_bytes += s.allocationBytes;
+			host_count += s.allocationCount;
+		}
+	}
+	uint64_t pool_bytes = 0, pool_count = 0;
+	{
+		std::scoped_lock lock(g_image_pool_mutex);
+		pool_bytes = g_image_pool_bytes;
+		pool_count = g_image_pool.size();
+	}
+	return fmt::format("device heap {} of {} MiB; allocations: device-local {} MiB ({}), host {} MiB ({}); image pool {} MiB ({})",
+	                   heap_usage >> 20u, heap_budget >> 20u, local_bytes >> 20u, local_count, host_bytes >> 20u,
+	                   host_count, pool_bytes >> 20u, pool_count);
 }
 
 bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanImage& image) {

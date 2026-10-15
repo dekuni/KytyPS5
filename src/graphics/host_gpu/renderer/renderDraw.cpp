@@ -1471,6 +1471,7 @@ bool RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	if (FrameCapture::Active()) {
 		CaptureFrameDraw(buffer, draw, state, bindings.vertex, bindings.pixel);
 	}
+	if (state.vs_input_info.stage.program != nullptr) FrameGen::NoteGameplayDraw(state.vs_input_info.stage.program->shader_hash);
 	if (FrameGen::Enabled() && state.vs_input_info.stage.program != nullptr) {
 		FrameGen::OnDraw(state.vs_input_info.stage.program->shader_hash,
 		                 state.vs_input_info.stage.resources.flattened_srt);
@@ -1542,10 +1543,16 @@ bool RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	// Resource preparation above may synchronously finish and restart the scheduler. From this
 	// point onward, every operation targets the current command buffer and cannot touch guest
 	// memory.
+	// FSR frame generation: the game's final composite is drawn once more without its HUD layer
+	// first, the frame without its HUD (frame-gen.h, HudlessWanted). Recorded directly.
+	const bool hudless = !mesh_active && emit.gpu_args == 0 && emit.direct_run.empty() && state.color_count == 1 &&
+	                     bindings.pixel.has_value() && state.ps_active && state.ps_input_info.stage.program != nullptr &&
+	                     FrameGen::IsFinalCompositeShader(state.ps_input_info.stage.program->shader_hash) &&
+	                     FrameGen::HudlessWanted();
 	bool record_draw = false;
 #ifdef KYTY_LOCAL_VULKAN_RECORDING
 	const auto primitive = ucfg.GetPrimType();
-	record_draw = LocalVulkanRecording::PacketsEnabled() && !mesh_active && emit.gpu_args == 0 &&
+	record_draw = LocalVulkanRecording::PacketsEnabled() && !mesh_active && emit.gpu_args == 0 && !hudless &&
 	    ((!set_bind_debug && !set_auto_debug) ||
 	     kyty_local_draw_packets_mode.load(std::memory_order_relaxed) != 0) &&
 	    (primitive == Prospero::PrimitiveType::kPointList ||
@@ -1607,6 +1614,34 @@ bool RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		buffer.InvalidateGraphicsState();
 	}
 
+	if (hudless) {
+		// The HUD layer: the texture as large as the output, RGBA16F (the scene is smaller).
+		auto&  cache  = m_context.GetTextureCache();
+		auto&  target = cache.GetImage(state.color_info[0].image_id);
+		Image* hud    = nullptr;
+		for (const auto& texture: bindings.pixel->images) {
+			if (!texture.image_id || texture.image_id == state.color_info[0].image_id) continue;
+			auto& image = cache.GetImage(texture.image_id);
+			if (image.backing.format == vk::Format::eR16G16B16A16Sfloat &&
+			    image.backing.extent.width == target.backing.extent.width &&
+			    image.backing.extent.height == target.backing.extent.height && image.backing.subresource_states.empty()) {
+				hud = &image;
+				break;
+			}
+		}
+		if (hud != nullptr && target.backing.subresource_states.empty()) {
+			FrameGen::SaveHud(m_context.GetGraphics(), buffer.Handle(), *hud);
+			m_context.GetCommandScheduler().BeginRendering(rendering);
+			EmitDrawPrimitives(ucfg, vk_buffer, state.vs_input_info, draw, emit); // (Handle() may record a barrier)
+			FrameGen::CaptureHudless(m_context.GetGraphics(), buffer.Handle(), target, *hud);
+		} else {
+			static std::atomic<uint32_t> reports {0};
+			if (reports.fetch_add(1, std::memory_order_relaxed) < 4) {
+				std::printf("FrameGen: the final composite has no HUD layer to clear (%s), no HUD-less frame\n",
+				            hud == nullptr ? "no RGBA16F texture as large as the output" : "per-subresource layouts");
+			}
+		}
+	}
 	LogDrawPhase(draw.name, "BeginRendering");
 	if (set_auto_debug) {
 		SetDrawDebugPhase(buffer, submit_id, draw, 0x400u);
