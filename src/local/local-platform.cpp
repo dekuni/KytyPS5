@@ -856,6 +856,138 @@ void MakeCriticalThread() {
 	(void)SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 }
 
+namespace {
+// d3dkmthk.h (WDK) structures for the display's vertical blank, taken from gdi32 at run time.
+using KmtHandle = UINT;
+struct KmtOpenAdapterFromGdiDisplayName {
+	WCHAR     DeviceName[32];
+	KmtHandle hAdapter;
+	LUID      AdapterLuid;
+	UINT      VidPnSourceId;
+};
+struct KmtWaitForVerticalBlankEvent {
+	KmtHandle hAdapter;
+	KmtHandle hDevice;
+	UINT      VidPnSourceId;
+};
+struct KmtCloseAdapter {
+	KmtHandle hAdapter;
+};
+using KmtOpenFn  = LONG(APIENTRY*)(KmtOpenAdapterFromGdiDisplayName*);
+using KmtWaitFn  = LONG(APIENTRY*)(const KmtWaitForVerticalBlankEvent*);
+using KmtCloseFn = LONG(APIENTRY*)(const KmtCloseAdapter*);
+
+struct DisplayVblanks {
+	std::mutex              mutex;
+	std::condition_variable changed;
+	uint64_t                count = 0;
+	std::atomic<HWND>       window {nullptr};
+	std::atomic<bool>       started {false};
+};
+DisplayVblanks g_display_vblanks;
+
+bool MonitorDevice(HWND window, HMONITOR& monitor, MONITORINFOEXW& info) {
+	monitor     = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+	info        = {};
+	info.cbSize = sizeof(info);
+	return monitor != nullptr && GetMonitorInfoW(monitor, &info) != FALSE;
+}
+
+void CountDisplayVblanks(KmtOpenFn open, KmtWaitFn wait, KmtCloseFn close) {
+	SetThreadName("Kyty.DisplayVblank");
+	MakeCriticalThread();
+	HMONITOR  monitor = nullptr;
+	KmtHandle adapter = 0;
+	UINT      source  = 0;
+	uint32_t  waits   = 0;
+	const auto release = [&] {
+		if (adapter != 0) {
+			const KmtCloseAdapter request {adapter};
+			(void)close(&request);
+			adapter = 0;
+		}
+	};
+	for (;;) {
+		// The window's display: at the start, after a failed wait and every 120 vblanks (the window may have moved).
+		if (adapter == 0 || ++waits >= 120) {
+			waits = 0;
+			HMONITOR       now = nullptr;
+			MONITORINFOEXW info {};
+			if (!MonitorDevice(g_display_vblanks.window.load(), now, info)) {
+				release();
+				Sleep(100);
+				continue;
+			}
+			if (adapter == 0 || now != monitor) {
+				release();
+				KmtOpenAdapterFromGdiDisplayName request {};
+				wcsncpy_s(request.DeviceName, info.szDevice, _TRUNCATE);
+				if (open(&request) != 0) {
+					Sleep(100);
+					continue;
+				}
+				monitor = now;
+				adapter = request.hAdapter;
+				source  = request.VidPnSourceId;
+			}
+		}
+		const KmtWaitForVerticalBlankEvent request {adapter, 0, source};
+		if (wait(&request) != 0) {
+			release();
+			Sleep(16);
+			continue;
+		}
+		{
+			std::lock_guard lock(g_display_vblanks.mutex);
+			g_display_vblanks.count++;
+		}
+		g_display_vblanks.changed.notify_all();
+	}
+}
+} // namespace
+
+int DisplayRefreshHz(void* window) {
+	HMONITOR       monitor = nullptr;
+	MONITORINFOEXW info {};
+	if (!MonitorDevice(static_cast<HWND>(window), monitor, info)) return 0;
+	DEVMODEW mode {};
+	mode.dmSize = sizeof(mode);
+	if (EnumDisplaySettingsW(info.szDevice, ENUM_CURRENT_SETTINGS, &mode) == FALSE) return 0;
+	return mode.dmDisplayFrequency > 1 ? static_cast<int>(mode.dmDisplayFrequency) : 0;
+}
+
+bool StartDisplayVblanks(void* window) {
+	g_display_vblanks.window.store(static_cast<HWND>(window));
+	if (g_display_vblanks.started.load()) return true;
+	HMODULE    gdi   = GetModuleHandleW(L"gdi32.dll");
+	if (gdi == nullptr) gdi = LoadLibraryW(L"gdi32.dll");
+	const auto open  = gdi != nullptr ? reinterpret_cast<KmtOpenFn>(reinterpret_cast<void*>(
+	                                       GetProcAddress(gdi, "D3DKMTOpenAdapterFromGdiDisplayName")))
+	                                  : nullptr;
+	const auto wait  = gdi != nullptr ? reinterpret_cast<KmtWaitFn>(reinterpret_cast<void*>(
+	                                       GetProcAddress(gdi, "D3DKMTWaitForVerticalBlankEvent")))
+	                                  : nullptr;
+	const auto close = gdi != nullptr ? reinterpret_cast<KmtCloseFn>(reinterpret_cast<void*>(
+	                                        GetProcAddress(gdi, "D3DKMTCloseAdapter")))
+	                                  : nullptr;
+	if (open == nullptr || wait == nullptr || close == nullptr) return false;
+	if (!g_display_vblanks.started.exchange(true)) std::thread(CountDisplayVblanks, open, wait, close).detach();
+	return true;
+}
+
+bool WaitDisplayVblank(uint64_t& seen, uint32_t timeout_us) {
+	if (!g_display_vblanks.started.load()) return false;
+	std::unique_lock lock(g_display_vblanks.mutex);
+	if (seen == 0) seen = g_display_vblanks.count; // (a caller's first wait: the next vblank)
+	if (!g_display_vblanks.changed.wait_for(lock, std::chrono::microseconds(timeout_us),
+	                                        [&] { return g_display_vblanks.count > seen; })) {
+		return false;
+	}
+	// One vblank a call: those that came while the caller was away are caught up, four at most.
+	seen = std::max(seen + 1, g_display_vblanks.count > 4 ? g_display_vblanks.count - 4 : uint64_t {0});
+	return true;
+}
+
 uint64_t OpenScratchFile() {
 	wchar_t directory[MAX_PATH + 1] {}, path[MAX_PATH + 1] {};
 	if (GetTempPathW(MAX_PATH + 1, directory) == 0 || GetTempFileNameW(directory, L"kyt", 0, path) == 0) return 0;
@@ -1388,6 +1520,107 @@ bool WriteAllocTrace(const char* path) {
 	return true;
 }
 
+// The process's address space walked with VirtualQuery; the resident bytes are estimated from one page of every 64 KiB
+// (QueryWorkingSetEx), so a region's resident figure is within a few percent of the truth.
+bool WriteAddressSpaceCensus(const char* path) {
+	FILE* file = std::fopen(path, "w");
+	if (file == nullptr) return false;
+	struct Sum {
+		uint64_t committed = 0, resident = 0, regions = 0;
+	};
+	std::map<std::wstring, Sum> mapped, images;
+	std::map<uint64_t, Sum>     allocations; // committed private memory by allocation base
+	Sum                         private_sum, mapped_sum, image_sum;
+	uint64_t                    reserved = 0, guard = 0, no_access = 0;
+	constexpr uint64_t          Stride = 64 * 1024;
+	std::vector<PSAPI_WORKING_SET_EX_INFORMATION> samples;
+	std::vector<std::pair<MEMORY_BASIC_INFORMATION, size_t>> regions; // (the region, its first sample)
+	MEMORY_BASIC_INFORMATION info {};
+	for (uint8_t* at = nullptr; VirtualQuery(at, &info, sizeof(info)) == sizeof(info);
+	     at = static_cast<uint8_t*>(info.BaseAddress) + info.RegionSize) {
+		if (info.State == MEM_FREE) continue;
+		if (info.State == MEM_RESERVE) {
+			reserved += info.RegionSize;
+			continue;
+		}
+		if ((info.Protect & PAGE_GUARD) != 0) guard += info.RegionSize;
+		if (info.Protect == PAGE_NOACCESS) no_access += info.RegionSize;
+		regions.emplace_back(info, samples.size());
+		for (uint64_t offset = 0; offset < info.RegionSize; offset += Stride) {
+			PSAPI_WORKING_SET_EX_INFORMATION sample {};
+			sample.VirtualAddress = static_cast<uint8_t*>(info.BaseAddress) + offset;
+			samples.push_back(sample);
+		}
+	}
+	if (!samples.empty()) {
+		// (In parts: the call's buffer is limited.)
+		constexpr size_t Part = 65536;
+		for (size_t i = 0; i < samples.size(); i += Part) {
+			const auto count = std::min(Part, samples.size() - i);
+			K32QueryWorkingSetEx(GetCurrentProcess(), &samples[i], static_cast<DWORD>(count * sizeof(samples[0])));
+		}
+	}
+	for (const auto& [region, first]: regions) {
+		uint64_t resident = 0;
+		const auto count  = (region.RegionSize + Stride - 1) / Stride;
+		for (size_t i = 0; i < count; i++)
+			if (samples[first + i].VirtualAttributes.Valid) resident += std::min<uint64_t>(Stride, region.RegionSize - i * Stride);
+		const auto add = [&](Sum& sum) {
+			sum.committed += region.RegionSize;
+			sum.resident += resident;
+			sum.regions++;
+		};
+		if (region.Type == MEM_PRIVATE) {
+			add(private_sum);
+			add(allocations[reinterpret_cast<uint64_t>(region.AllocationBase)]);
+		} else {
+			wchar_t name[MAX_PATH] = L"?";
+			if (K32GetMappedFileNameW(GetCurrentProcess(), region.BaseAddress, name, MAX_PATH) == 0) {
+				name[0] = L'?';
+				name[1] = 0;
+			}
+			add(region.Type == MEM_IMAGE ? image_sum : mapped_sum);
+			add((region.Type == MEM_IMAGE ? images : mapped)[name]);
+		}
+	}
+	const auto memory = ProcessMemory();
+	const auto mib    = [](uint64_t bytes) { return static_cast<unsigned long long>(bytes >> 20u); };
+	std::fprintf(file, "kind\tcommitted_mib\tresident_mib\tregions\tname\n");
+	std::fprintf(file, "process\t%llu\t%llu\t0\tprivate bytes / working set\n", mib(memory.private_bytes), mib(memory.working_set));
+	std::fprintf(file, "private\t%llu\t%llu\t%llu\t(guard %llu, no access %llu; reserved only %llu)\n", mib(private_sum.committed),
+	             mib(private_sum.resident), static_cast<unsigned long long>(private_sum.regions), mib(guard), mib(no_access),
+	             mib(reserved));
+	std::fprintf(file, "mapped\t%llu\t%llu\t%llu\tall files\n", mib(mapped_sum.committed), mib(mapped_sum.resident),
+	             static_cast<unsigned long long>(mapped_sum.regions));
+	std::fprintf(file, "image\t%llu\t%llu\t%llu\tall modules\n", mib(image_sum.committed), mib(image_sum.resident),
+	             static_cast<unsigned long long>(image_sum.regions));
+	const auto write_named = [&](const char* kind, const std::map<std::wstring, Sum>& sums) {
+		std::vector<std::pair<std::wstring, Sum>> sorted(sums.begin(), sums.end());
+		std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.second.committed > b.second.committed; });
+		for (const auto& [name, sum]: sorted) {
+			if (sum.committed < (1u << 20u)) break;
+			std::fprintf(file, "%s\t%llu\t%llu\t%llu\t%ls\n", kind, mib(sum.committed), mib(sum.resident),
+			             static_cast<unsigned long long>(sum.regions), name.c_str());
+		}
+	};
+	write_named("mapped-file", mapped);
+	write_named("image-module", images);
+	std::vector<std::pair<uint64_t, Sum>> sorted(allocations.begin(), allocations.end());
+	std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.second.committed > b.second.committed; });
+	size_t written = 0;
+	for (const auto& [base, sum]: sorted) {
+		if (written++ == 48 || sum.committed < (4u << 20u)) break;
+		std::fprintf(file, "allocation\t%llu\t%llu\t%llu\t0x%llx\n", mib(sum.committed), mib(sum.resident),
+		             static_cast<unsigned long long>(sum.regions), static_cast<unsigned long long>(base));
+	}
+	std::fclose(file);
+	std::printf("Address space: private %llu MiB committed (%llu resident), mapped files %llu (%llu), modules %llu (%llu); "
+	            "process private %llu, working set %llu MiB\n",
+	            mib(private_sum.committed), mib(private_sum.resident), mib(mapped_sum.committed), mib(mapped_sum.resident),
+	            mib(image_sum.committed), mib(image_sum.resident), mib(memory.private_bytes), mib(memory.working_set));
+	return true;
+}
+
 MemoryUse ProcessMemory() {
 	PROCESS_MEMORY_COUNTERS_EX counters {};
 	counters.cb = sizeof(counters);
@@ -1634,6 +1867,18 @@ void MakeBackgroundThread(const char* avoid_cpus) {
 
 void MakeCriticalThread() {}
 
+int DisplayRefreshHz(void* /*window*/) {
+	return 0;
+}
+
+bool StartDisplayVblanks(void* /*window*/) {
+	return false;
+}
+
+bool WaitDisplayVblank(uint64_t& /*seen*/, uint32_t /*timeout_us*/) {
+	return false;
+}
+
 // Handles are the file descriptor + 1 (0: none).
 uint64_t OpenScratchFile() {
 	const char* directory = std::getenv("TMPDIR");
@@ -1690,6 +1935,10 @@ uint64_t FileSize(uint64_t file) {
 }
 
 bool WriteHeapHistogram(const char*) {
+	return false;
+}
+
+bool WriteAddressSpaceCensus(const char*) {
 	return false;
 }
 

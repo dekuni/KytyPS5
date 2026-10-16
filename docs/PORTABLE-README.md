@@ -168,7 +168,8 @@ In fullscreen on a screen that is not 16:9 (ultrawide, 16:10): black bars instea
 
 - "60 (PS5)" (default): the game's own limit.
 - "120": lets the game run above 60 where your PC is fast enough. The game keeps its normal speed;
-  movies, menus and loading screens stay at 60.
+  movies, menus and loading screens stay at 60. Known issue (beta): with it on, the sound can chop and the
+  game hitches more in busy places; keep it at 60 for now if you see that.
 
 ### VSync
 
@@ -281,24 +282,36 @@ Face buttons go by position, as on a DualSense: the bottom button is Cross, righ
 Square and top is Triangle (on an Xbox controller: A, B, X, Y). Xbox controllers have no touch pad
 button; use Backspace or Tab on the keyboard for it.
 
-Default keyboard layout:
+Keyboard and mouse (the default layout; the mouse turns the camera from the first click in the window,
+Esc or F7 gives it back, and it is released while another window has the focus):
 
 | Key | Does |
 | --- | --- |
 | W A S D | Left stick (move) |
-| T F G H | Right stick (camera: T up, G down, F left, H right) |
-| J / L / K / I | Cross / Circle / Square / Triangle |
-| Q / E | L1 / R1 |
-| Shift / Ctrl | L3 / R3 |
-| Arrow keys | D-pad |
+| Mouse | Right stick (camera); speed follows the mouse, `KYTY_MOUSE_SENSITIVITY=0.1..5` scales it |
+| Left / right mouse button | R1 attack / L1 block |
+| Middle mouse button | R3 (lock on) |
+| Mouse side buttons | L2 / R2 |
+| Mouse wheel | D-pad up / down (spells / items) |
+| Space | Circle (roll, backstep, sprint) |
+| E | Cross (interact, confirm) |
+| R | Square (use the item) |
+| F | Triangle (two-hand) |
+| Q | L1 (block, for the keyboard) |
+| Shift / Ctrl | R2 (strong attack) / L2 |
+| C / Z | R3 (lock on) / L3 |
+| 1 2 3 4, arrow keys | D-pad up / left / right / down (spells, left weapon, right weapon, items) |
+| I J K L | Right stick on the keyboard (camera: I up, K down, J left, L right) |
 | Enter | OPTIONS |
 | Backspace / Tab | Left / right half of the touch pad |
-| F7 | Camera with the mouse (press again to release the mouse) |
+| Esc, F7 | Release the mouse (F7 also takes it again) |
 | Pause/Break | Pause or resume the emulation |
 | F11, Alt+Enter | Switch between window and full screen |
 | F9 / F10, F8 | Debug warp (see below) |
 
-The keyboard has no L2 / R2 by default: use a controller when you need them.
+`KYTY_MOUSE_CAPTURE=0` leaves the mouse alone until F7; `KYTY_MOUSE_INVERT_Y=1` swaps the camera's up and
+down; `KYTY_KEYBOARD_LAYOUT=classic` restores the earlier layout (J/L/K/I face buttons, T/F/G/H camera, Q/E
+L1/R1, Shift/Ctrl L3/R3, no mouse buttons). `--keymap` (advanced) replaces the layout with your own.
 
 Debug warp, for testing other areas: F9 and F10 show the list of spawn points of every map and move
 through it; F8 arms the one shown (press F8 again to cancel). Then quit to the title screen (OPTIONS >
@@ -373,7 +386,11 @@ Windows deletes them when the emulator closes.
 
 Updating to a newer release: unzip it into a new folder, then move `_SaveData` and `_PipelineCache`
 (and `launcher-settings.json`) over from the old one. A precompile of the new release then compiles only
-what changed.
+what changed. The launcher may then show "New shaders to precompile" because the new release remade the
+shader lists: that precompile re-checks the lists against what you have (about five minutes on a fast PC)
+and compiles only what is missing, often nothing. When the release changed the emulator's shader code, the
+first launch also translates the game's shaders again in the background (a few minutes; new scenes can
+stutter the first time until it is done); the precompiled pipelines stay.
 
 
 ## Uninstalling

@@ -36,6 +36,8 @@ struct GraphicContext {
 	bool                               memory_priority_enabled               = false;
 	bool                               rt_extensions_enabled                 = false;
 	bool                               compute_subgroup_size_control_enabled = false;
+	// A pipeline may require 64-lane subgroups of its pixel shader (KYTY_PS_WAVE64).
+	bool                               fragment_wave64_requirable            = false;
 	// With subgroup size control: wave64 compute programs run on 64-lane subgroups (else emulated on 32-lane ones, two
 	// guest lanes an invocation). VulkanInitSubgroupSizeControl decides it (KYTY_COMPUTE_WAVE64).
 	bool                               compute_wave64_native                 = false;
@@ -154,7 +156,8 @@ struct GraphicContext {
 	[[nodiscard]] uint64_t GetTotalMemoryBudget() const;
 	// The device-local heaps' budget as the system reports it (no margins; GetTotalMemoryBudget is what the caches use).
 	[[nodiscard]] uint64_t GetDeviceMemoryBudget() const;
-	[[nodiscard]] bool     CreateImage(const vk::ImageCreateInfo& info, VulkanImage& image);
+	// `host_memory`: in system memory (host-visible), not video memory (TextureCache::DemoteImage); the pool not used.
+	[[nodiscard]] bool     CreateImage(const vk::ImageCreateInfo& info, VulkanImage& image, bool host_memory = false);
 	void                   DeleteImage(VulkanImage& image);
 	// Frees the images kept for reuse (KYTY_IMAGE_POOL): video memory ran out.
 	void                   TrimImagePool();
@@ -209,6 +212,7 @@ struct VulkanImageState {
 };
 
 struct VulkanImage {
+	bool host_memory = false; // its memory is host-visible system memory (CreateImage with host_memory)
 	VulkanImage() = default;
 	KYTY_CLASS_NO_COPY(VulkanImage);
 

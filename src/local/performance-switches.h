@@ -28,6 +28,7 @@ extern volatile std::atomic_uint32_t kyty_local_image_barrier_dedupe;
 extern volatile std::atomic_uint32_t kyty_local_pending_drain_mode;
 extern volatile std::atomic_uint32_t kyty_local_dispatch_batch;
 extern volatile std::atomic_uint32_t kyty_local_draw_batch;
+extern volatile std::atomic_uint32_t kyty_local_draw_batch_idle;
 extern volatile std::atomic<uint32_t> kyty_local_upload_prologue;
 extern volatile std::atomic_uint32_t kyty_local_async_lod_stats_mode;
 extern volatile std::atomic<uint32_t> kyty_local_buffer_reclaim_mode;
@@ -43,6 +44,7 @@ extern volatile std::atomic_uint32_t kyty_local_async_xpr_pipelines_mode;
 extern volatile std::atomic_uint32_t kyty_local_native_xpr_relocate_mode;
 extern volatile std::atomic_uint32_t kyty_local_native_xpr_store_budget;
 extern volatile std::atomic_uint32_t kyty_local_native_xpr_keep_frames;
+extern volatile std::atomic_uint32_t kyty_local_native_xpr_sweep_frames;
 extern volatile std::atomic_uint32_t kyty_local_native_xpr_instance_mode;
 extern volatile std::atomic_uint32_t kyty_local_table_xpr_mode;
 extern volatile std::atomic_uint32_t kyty_local_table_dispatch_mode;
@@ -111,6 +113,8 @@ inline void InitializePerformanceSwitches() {
 	    Switch {"KYTY_DISPATCH_BATCH", &kyty_local_dispatch_batch, 1, 65536},
 	    // Draws recorded per submission (0: no limit).
 	    Switch {"KYTY_DRAW_BATCH", &kyty_local_draw_batch, 0, 65536},
+	    // Draws after which a part is submitted while the GPU idles (0: only at the batch).
+	    Switch {"KYTY_DRAW_BATCH_IDLE", &kyty_local_draw_batch_idle, 0, 65536},
 	    // Buffer uploads of pages dirty since before the open command buffer in its upload prologue (on by default).
 	    Switch {"KYTY_UPLOAD_PROLOGUE", &kyty_local_upload_prologue},
 #if defined(KYTY_LOCAL_VULKAN_RECORDING)
@@ -127,6 +131,8 @@ inline void InitializePerformanceSwitches() {
 	    Switch {"KYTY_NATIVE_XPR_STORE_BUDGET", &kyty_local_native_xpr_store_budget, 0, 65536},
 	    // Frames an unused native XPR record stays (at least 2).
 	    Switch {"KYTY_NATIVE_XPR_KEEP_FRAMES", &kyty_local_native_xpr_keep_frames, 0, 1000000},
+	    // Frames between sweeps of the unused native XPR records (at least 1).
+	    Switch {"KYTY_NATIVE_XPR_SWEEP_FRAMES", &kyty_local_native_xpr_sweep_frames, 1, 1000000},
 	    Switch {"KYTY_NATIVE_XPR_INSTANCES", &kyty_local_native_xpr_instance_mode},
 	    // Table draws (src/local/table-xpr.inc), with native XPR draws; 2 also continues clean runs.
 	    Switch {"KYTY_TABLE_XPR", &kyty_local_table_xpr_mode, 0, 2},

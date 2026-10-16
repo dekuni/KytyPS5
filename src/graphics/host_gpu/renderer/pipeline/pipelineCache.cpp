@@ -501,20 +501,48 @@ struct PipelineCache::ProgramCache {
 		bool                                                        plan_out = false;
 		std::shared_ptr<const ShaderRecompiler::IR::LinearSrtPlan> plan_linear;
 		uint32_t                                                    plan_use = 0;
+		bool                                                        plan_loading = false; // a worker reads it (PreloadPlans)
+		// Its place in plans_out_by_use while out of memory and not asked of a worker (plan_listed).
+		std::multimap<uint32_t, SourceEntry*>::iterator             plan_node {};
+		bool                                                        plan_listed = false;
+		bool                                                        plan_preloaded = false; // back by a worker, not used since
 	};
-	// Plans: sweeps so far (one a flip, SweepPlans), out of memory now, brought back.
+	// Plans: sweeps so far (one a flip, SweepPlans), out of memory now, brought back (by the render thread; by workers).
 	uint32_t plan_clock = 0;
 	size_t   plans_out = 0;
-	uint64_t plan_reloads = 0;
+	uint64_t plan_reloads = 0, plan_preloads = 0, plan_preload_uses = 0;
 
-	// The source's plan in memory again (before each use of it), its last use noted.
-	void EnsurePlan(SourceEntry& source) {
-		source.plan_use = plan_clock;
-		if (!source.plan_out) return;
+	// A place's plans come back together: a frame at 1-1 back from other worlds rebuilt ~70 (29 ms of IR, operator new
+	// the most of it) on the render thread. The first one it brings back sends the others of its time (last used within
+	// PreloadWindow flips of it) to the compile workers, and the render thread takes theirs as they come (EnsurePlan,
+	// each flip SweepPlans). The plans out of memory by their last use; the workers' results (by entry, with the count of
+	// erased programs when they were asked: an entry erased since may be gone, its result dropped unread).
+	std::multimap<uint32_t, SourceEntry*> plans_out_by_use;
+	struct LoadedPlan {
 		ShaderRecompiler::IR::ResourcePlan plan;
 		bool                               linear = false;
-		if (!LoadPlanBytes(source.plan_spilled, plan, linear) || linear != (source.plan_linear != nullptr))
-			EXIT("a shader's resource plan could not be read back from the scratch file\n");
+		uint64_t                           erased = 0;
+	};
+	struct PlanLoads {
+		std::mutex                                   mutex;
+		std::unordered_map<SourceEntry*, LoadedPlan> plans;
+	};
+	std::shared_ptr<PlanLoads> plan_loads = std::make_shared<PlanLoads>();
+	uint64_t                   programs_erased = 0;
+	void UnlistPlan(SourceEntry& source) {
+		if (!source.plan_listed) return;
+		plans_out_by_use.erase(source.plan_node);
+		source.plan_listed = false;
+	}
+	// An entry about to be erased: no queue keeps it (rare: a warm program whose code changed).
+	void ForgetPlanLoads(SourceEntry& entry) {
+		UnlistPlan(entry);
+		programs_erased++;
+	}
+
+	// The plan back in the entry (its linear SRT plan kept meanwhile).
+	void RestorePlan(SourceEntry& source, ShaderRecompiler::IR::ResourcePlan plan) {
+		UnlistPlan(source);
 		plan.linear_srt      = std::move(source.plan_linear);
 		source.resource_plan = std::move(plan);
 		// (The guard knows the plan by its address: the same, but it is checked again from the start.)
@@ -522,12 +550,103 @@ struct PipelineCache::ProgramCache {
 		source.guarded_permutation  = nullptr;
 		source.plan_out             = false;
 		plans_out--;
+	}
+
+	// A worker's result for the entry, taken (false: none, or one not to use).
+	bool TakeLoadedPlan(SourceEntry& source, ShaderRecompiler::IR::ResourcePlan& plan) {
+		LoadedPlan loaded;
+		{
+			std::lock_guard lock(plan_loads->mutex);
+			const auto      found = plan_loads->plans.find(&source);
+			if (found == plan_loads->plans.end()) return false;
+			loaded = std::move(found->second);
+			plan_loads->plans.erase(found);
+		}
+		source.plan_loading = false;
+		if (loaded.erased != programs_erased || loaded.linear != (source.plan_linear != nullptr)) return false;
+		plan = std::move(loaded.plan);
+		return true;
+	}
+
+	// The plans out of memory last used within PreloadWindow flips of `around` to the compile workers.
+	void PreloadPlans(uint32_t around) {
+		// (16 GB simulated, 5 worlds x2: 600 flips brought back 14,072 plans beside the render thread, 3,861 of them used
+		// before leaving again, and left it 207 of its own; 150 flips missed some: spins at 1-1 and Latria fell to 30-38 fps.)
+		static constexpr uint32_t PreloadWindow = 600;
+		static constexpr size_t   MaxPlans = 256, PlansPerJob = 4;
+		if (!push_job || plans_out_by_use.empty()) return;
+		std::vector<std::pair<SourceEntry*, SpilledPlan>> batch;
+		for (auto it = plans_out_by_use.lower_bound(around > PreloadWindow ? around - PreloadWindow : 0);
+		     it != plans_out_by_use.end() && it->first <= around + PreloadWindow && batch.size() < MaxPlans;) {
+			auto* entry        = it->second;
+			it                 = plans_out_by_use.erase(it); // (listed again when out again)
+			entry->plan_listed = false;
+			if (!entry->plan_out || entry->plan_loading) continue;
+			entry->plan_loading = true;
+			batch.emplace_back(entry, entry->plan_spilled);
+		}
+		for (size_t first = 0; first < batch.size(); first += PlansPerJob) {
+			std::vector<std::pair<SourceEntry*, SpilledPlan>> part(
+			    batch.begin() + static_cast<std::ptrdiff_t>(first),
+			    batch.begin() + static_cast<std::ptrdiff_t>(std::min(batch.size(), first + PlansPerJob)));
+			push_job([loads = plan_loads, part = std::move(part), erased = programs_erased] {
+				for (const auto& [entry, spilled]: part) {
+					LoadedPlan loaded;
+					loaded.erased = erased;
+					if (!LoadPlanBytes(spilled, loaded.plan, loaded.linear)) continue; // (the render thread reads it)
+					std::lock_guard lock(loads->mutex);
+					loads->plans[entry] = std::move(loaded);
+				}
+			});
+		}
+	}
+
+	// The workers' results in their entries (each flip): those of entries still out, a use noted (their place is back).
+	void DrainLoadedPlans() {
+		std::unordered_map<SourceEntry*, LoadedPlan> plans;
+		{
+			std::lock_guard lock(plan_loads->mutex);
+			if (plan_loads->plans.empty()) return;
+			plans.swap(plan_loads->plans);
+		}
+		for (auto& [entry, loaded]: plans) {
+			if (loaded.erased != programs_erased) continue; // (the entry may be gone)
+			entry->plan_loading = false;
+			if (!entry->plan_out || loaded.linear != (entry->plan_linear != nullptr)) continue;
+			RestorePlan(*entry, std::move(loaded.plan));
+			entry->plan_use       = plan_clock;
+			entry->plan_preloaded = true;
+			plan_preloads++;
+		}
+	}
+
+	// The source's plan in memory again (before each use of it), its last use noted.
+	void EnsurePlan(SourceEntry& source) {
+		const auto last_use = source.plan_use;
+		source.plan_use     = plan_clock;
+		if (source.plan_preloaded) {
+			source.plan_preloaded = false;
+			plan_preload_uses++;
+		}
+		if (!source.plan_out) return;
+		ShaderRecompiler::IR::ResourcePlan plan;
+		if (!TakeLoadedPlan(source, plan)) {
+			PreloadPlans(last_use);
+			bool linear = false;
+			if (!LoadPlanBytes(source.plan_spilled, plan, linear) || linear != (source.plan_linear != nullptr))
+				EXIT("a shader's resource plan could not be read back from the scratch file\n");
+		}
+		RestorePlan(source, std::move(plan));
 		plan_reloads++;
 	}
 
-	// Each flip; every PlanSweepFlips, the plans no use needed for PlanIdleFlips leave memory, written first where no
-	// file holds them yet (a few a sweep: programs translated during play; the warmup's and the prefetch's are). They
-	// are destroyed on a compile worker (the warmup's thousands at once: their IR nodes freed off the render thread).
+	// Each flip; every PlanSweepFlips, the plans no use needed for PlanIdleFlips leave memory beyond a budget of RAM/128
+	// (~77 KB a plan: 1,700 at 16 GB, 3,400 at 32 GB, 13,600 at 128 GB), the least recently used first, written first
+	// where no file holds them yet (a few a sweep: programs translated during play; the warmup's and the prefetch's are).
+	// They are destroyed on a compile worker (the warmup's thousands at once: their IR nodes freed off the render thread).
+	// Without the budget every idle plan left, also on PCs with RAM to spare: a place came back with a frame of reloads
+	// (~70 plans, 29 ms of IR rebuilt): a walk at 1-1 back from other worlds peaked at 42 ms each time, 20-24 ms kept;
+	// Stonefang's walk 1% low 54-57 fps, 78-81 kept.
 	void SweepPlans() {
 		// (KYTY_PLAN_IDLE_FLIPS=<n>: another idle time, and a sweep each n/30 flips: a test of plans leaving and coming
 		// back all the time.)
@@ -538,12 +657,28 @@ struct PipelineCache::ProgramCache {
 		}();
 		static constexpr uint32_t PlanWritesPerSweep = 4;
 		const uint32_t            PlanSweepFlips     = PlanIdleFlips / 30u;
+		DrainLoadedPlans();
 		if (!PlanEvictionEnabled() || ++plan_clock % PlanSweepFlips != 0) return;
-		uint32_t writes = 0;
-		auto     freed  = std::make_shared<std::vector<ShaderRecompiler::IR::ResourcePlan>>();
+		// (RAM the system does not report: a budget of 0, every idle plan leaves.)
+		static const size_t budget = [] {
+			const uint64_t ram = LocalPlatform::PhysicalMemory();
+			return static_cast<size_t>(ram / 128u / (77u * 1024u));
+		}();
+		size_t                    in_memory = 0;
+		std::vector<SourceEntry*> idle;
 		for (auto& [key, source]: programs) {
 			(void)key;
-			if (source.plan_out || plan_clock - source.plan_use < PlanIdleFlips) continue;
+			if (source.plan_out) continue;
+			in_memory++;
+			if (plan_clock - source.plan_use >= PlanIdleFlips) idle.push_back(&source);
+		}
+		if (in_memory <= budget || idle.empty()) return;
+		std::ranges::sort(idle, {}, [](const SourceEntry* source) { return source->plan_use; });
+		idle.resize(std::min(idle.size(), in_memory - budget));
+		uint32_t writes = 0;
+		auto     freed  = std::make_shared<std::vector<ShaderRecompiler::IR::ResourcePlan>>();
+		for (auto* entry: idle) {
+			auto& source = *entry;
 			if (source.plan_spilled.bytes == 0) {
 				if (writes >= PlanWritesPerSweep || !SpillPlanBytes(source.resource_plan, source.plan_spilled)) continue;
 				writes++;
@@ -551,13 +686,17 @@ struct PipelineCache::ProgramCache {
 			source.plan_linear = std::move(source.resource_plan.linear_srt);
 			freed->push_back(std::move(source.resource_plan));
 			source.resource_plan = {};
-			source.plan_out      = true;
+			source.plan_out       = true;
+			source.plan_preloaded = false;
 			plans_out++;
+			source.plan_node   = plans_out_by_use.emplace(source.plan_use, &source);
+			source.plan_listed = true;
 		}
 		if (freed->empty()) return;
 		if (freed->size() >= 256)
-			PipelineCacheLog("Shader plans: {} out of memory ({} now), {} brought back so far", plans_out, freed->size(),
-			                 plan_reloads);
+			PipelineCacheLog("Shader plans: {} out of memory ({} now), {} brought back so far ({} beside the render thread, "
+			                 "{} of those used)",
+			                 plans_out, freed->size(), plan_reloads + plan_preloads, plan_preloads, plan_preload_uses);
 		if (push_job) push_job([freed] { freed->clear(); });
 	}
 	// Runs a job on the pipeline cache's compile workers (set by PipelineCache).
@@ -915,23 +1054,23 @@ struct PipelineCache::ProgramCache {
 		return reader.ok;
 	}
 
-	// The group's plan and modules from its entry; false (and nothing set) when it does not read.
-	bool LoadStored(Prefetch::Group& group) {
+	// An entry's plan and modules (its key read past); false (and nothing set) when it does not read.
+	static bool ParseStoreEntry(std::span<const uint8_t> entry, std::optional<ShaderRecompiler::IR::ResourcePlan>& plan,
+	                            std::vector<PrefetchedModule>& modules) {
 		ProgramKey  key;
 		uint64_t    source = 0, records_hash = 0;
-		StoreReader reader {group.stored};
-		if (!StoreEntryKey(group.stored, key, source, records_hash)) return false;
+		StoreReader reader {entry};
+		if (!StoreEntryKey(entry, key, source, records_hash)) return false;
 		(void)reader.Get<uint32_t>(), (void)reader.Get<uint64_t>(), (void)reader.Get<uint32_t>(), (void)reader.Get<uint32_t>();
 		(void)reader.Span(), (void)reader.Get<uint64_t>(), (void)reader.Get<uint64_t>();
 		const auto plan_bytes = reader.Span();
 		if (!reader.ok) return false;
 		// No plan: a program the recompiler rejects (code the game never runs), no modules.
-		std::optional<ShaderRecompiler::IR::ResourcePlan> plan;
-		if (!plan_bytes.empty() && !ShaderRecompiler::DiskCache::DeserializePlan(plan_bytes, plan.emplace())) return false;
-		std::vector<PrefetchedModule> modules(reader.Get<uint32_t>());
-		if (!plan && !modules.empty()) return false;
-		if (!reader.ok || modules.size() > group.records.size()) return false;
-		for (auto& module: modules) {
+		std::optional<ShaderRecompiler::IR::ResourcePlan> read_plan;
+		if (!plan_bytes.empty() && !ShaderRecompiler::DiskCache::DeserializePlan(plan_bytes, read_plan.emplace())) return false;
+		std::vector<PrefetchedModule> read_modules(reader.Get<uint32_t>());
+		if (!reader.ok || (!read_plan && !read_modules.empty())) return false;
+		for (auto& module: read_modules) {
 			const auto bytes = reader.Span();
 			if (!reader.ok || !ShaderRecompiler::DiskCache::DeserializeModule(bytes, module.specialization, module.program))
 				return false;
@@ -939,10 +1078,48 @@ struct PipelineCache::ProgramCache {
 			module.spirv_words  = reader.Get<uint64_t>();
 			module.spirv_hash   = reader.Get<uint64_t>();
 		}
-		if (!reader.ok || reader.at != group.stored.size()) return false;
+		if (!reader.ok || reader.at != entry.size()) return false;
+		plan    = std::move(read_plan);
+		modules = std::move(read_modules);
+		return true;
+	}
+
+	// The group's plan and modules from its entry; false (and nothing set) when it does not read.
+	bool LoadStored(Prefetch::Group& group) {
+		std::optional<ShaderRecompiler::IR::ResourcePlan> plan;
+		std::vector<PrefetchedModule>                     modules;
+		if (!ParseStoreEntry(group.stored, plan, modules) || modules.size() > group.records.size()) return false;
 		group.plan    = std::move(plan);
 		group.modules = std::move(modules);
 		return true;
+	}
+
+	// The store's files for the static inputs' path: <inputs stem>.<switches hash>.index and .spirv under translated/.
+	static void StoreFiles(const std::filesystem::path& inputs_path, std::filesystem::path& index,
+	                       std::filesystem::path& spirv) {
+		const auto directory = inputs_path.parent_path().parent_path() / "translated";
+		const auto switches  = StoreSwitches();
+		const auto name      = inputs_path.stem().string() +
+		                  fmt::format(".{:08x}", static_cast<uint32_t>(XXH3_64bits(switches.data(), switches.size())));
+		index = directory / (name + ".index");
+		spirv = directory / (name + ".spirv");
+	}
+
+	// The index read whole; empty when it is missing, another recompiler's or other switches' (StoreHeader), or damaged.
+	static std::vector<uint8_t> ReadStoreIndex(const std::filesystem::path& path) {
+		std::vector<uint8_t> bytes;
+		const auto           header = StoreHeader();
+		std::error_code      error;
+		Common::File         file;
+		if (!std::filesystem::exists(path, error) || !file.Open(path, Common::File::Mode::Read)) return bytes;
+		bytes.resize(file.Size());
+		uint32_t read = 0;
+		if (!bytes.empty()) file.Read(bytes.data(), static_cast<uint32_t>(bytes.size()), &read);
+		file.Close();
+		if (read != bytes.size() || bytes.size() < header.size() ||
+		    std::memcmp(bytes.data(), header.data(), header.size()) != 0)
+			bytes.clear();
+		return bytes;
 	}
 
 	// Appends an entry to the new index (a worker or the render thread).
@@ -980,33 +1157,17 @@ struct PipelineCache::ProgramCache {
 	bool OpenStore(const std::filesystem::path& inputs_path) {
 		auto& p = *prefetch;
 		if (!StoreEnabled()) return false;
-		const auto directory = inputs_path.parent_path().parent_path() / "translated";
-		std::error_code error;
-		std::filesystem::create_directories(directory, error);
 		// Each set of switches keeps a store of its own, so an A/B of a switch does not translate the game
 		// again at every launch. SHORTCUT: a store whose recompiler or switches are gone stays on disk
 		// (~6 GB) until deleted; prune by age if more than a few sets come into use.
-		const auto switches  = StoreSwitches();
-		const auto name      = inputs_path.stem().string() +
-		                  fmt::format(".{:08x}", static_cast<uint32_t>(XXH3_64bits(switches.data(), switches.size())));
-		p.store_path         = directory / (name + ".index");
-		const auto spirv     = directory / (name + ".spirv");
-		const auto header    = StoreHeader();
-		size_t     entries   = 0, matched = 0;
-		{
-			Common::File file;
-			if (std::filesystem::exists(p.store_path, error) && file.Open(p.store_path, Common::File::Mode::Read)) {
-				p.store_index.resize(file.Size());
-				uint32_t read = 0;
-				if (!p.store_index.empty()) file.Read(p.store_index.data(), static_cast<uint32_t>(p.store_index.size()), &read);
-				file.Close();
-				if (read != p.store_index.size() || p.store_index.size() < header.size() ||
-				    std::memcmp(p.store_index.data(), header.data(), header.size()) != 0) {
-					p.store_index.clear(); // another recompiler, other switches, or damaged: translated again
-				}
-			}
-		}
-		const bool kept = !p.store_index.empty();
+		std::filesystem::path spirv;
+		StoreFiles(inputs_path, p.store_path, spirv);
+		std::error_code error;
+		std::filesystem::create_directories(p.store_path.parent_path(), error);
+		const auto header  = StoreHeader();
+		size_t     entries = 0, matched = 0;
+		p.store_index      = ReadStoreIndex(p.store_path); // (empty: another recompiler, other switches, or damaged)
+		const bool kept    = !p.store_index.empty();
 		std::unordered_map<ProgramKey, std::span<const uint8_t>, ProgramKeyHash> found;
 		uint64_t   named_end = 0; // the end of the SPIR-V the kept index names
 		bool       named_all = kept;
@@ -1120,33 +1281,93 @@ struct PipelineCache::ProgramCache {
 		                 p.spill_end.load(std::memory_order_relaxed) >> 20u, error ? " - could not replace the old index" : "");
 	}
 
+	// The translation store read for the warmup (KYTY_SHADER_WARMUP_STORE=0: not): a record whose program the store
+	// holds with a module of its specialization is taken from it instead of translated (TranslateWarmup; 10-15: the
+	// 8,342 recorded permutations translated on 12 threads beside the game took 36 s, while the game arrived). Opened
+	// before the warmup, closed before the shader prefetch opens the store for writing. The prefetch translates and
+	// keeps the warmup's programs too (it left them out before), so the store holds them from the next launch on.
+	// SHORTCUT: at a launch whose store lacks them, the prefetch translates them a second time (once per store).
+	struct WarmStore {
+		std::vector<uint8_t>                                                      index;
+		std::unordered_map<ProgramKey, std::span<const uint8_t>, ProgramKeyHash> found;
+		uint64_t                                                                  spirv = 0; // OpenFileForReading
+		mutable std::atomic<size_t>                                               hits {0};
+	};
+	std::unique_ptr<WarmStore> warm_store;
+
+	void OpenWarmStore(const std::filesystem::path& inputs_path) {
+		if (!StoreEnabled()) return;
+		if (const char* value = std::getenv("KYTY_SHADER_WARMUP_STORE"); value != nullptr && value[0] == '0') return;
+		std::filesystem::path index_path, spirv_path;
+		StoreFiles(inputs_path, index_path, spirv_path);
+		auto store   = std::make_unique<WarmStore>();
+		store->index = ReadStoreIndex(index_path);
+		if (store->index.empty()) return;
+		const auto header = StoreHeader();
+		for (StoreReader reader {store->index, header.size()}; reader.at < store->index.size();) {
+			const auto entry = reader.Span();
+			if (!reader.ok) break;
+			ProgramKey key;
+			uint64_t   source = 0, records_hash = 0;
+			if (StoreEntryKey(entry, key, source, records_hash)) store->found.insert_or_assign(std::move(key), entry);
+		}
+		store->spirv = LocalPlatform::OpenFileForReading(Common::PathToString(spirv_path).c_str());
+		if (store->spirv == 0 || store->found.empty()) {
+			if (store->spirv != 0) LocalPlatform::CloseScratchFile(store->spirv);
+			return;
+		}
+		warm_store = std::move(store);
+	}
+
+	void CloseWarmStore() {
+		if (!warm_store) return;
+		LocalPlatform::CloseScratchFile(warm_store->spirv);
+		warm_store.reset();
+	}
+
 	// Loads the inputs on a thread of its own, leaves out the programs the warmup holds (`warm`), and
 	// starts the translation: first the programs of this PC's recorded play (`recorded`, the warmup's records when it
-	// translated none) in the order they were first met, then the rest, the biggest first.
+	// translated none) in the order they were first met, then the rest, the biggest first. A PC without recorded play
+	// (`recorded` and `warm` empty: a new install) takes the release's instead (`released`, a recorded seed file; its
+	// compute records made for `host_subgroup_size`).
 	void StartPrefetch(std::filesystem::path path, std::string identity, std::vector<ProgramKey> warm,
-	                   std::vector<std::vector<uint32_t>> recorded) {
+	                   std::vector<std::vector<uint32_t>> recorded, std::filesystem::path released,
+	                   uint32_t host_subgroup_size) {
 		prefetch = std::make_unique<Prefetch>();
 		prefetch_live.store(prefetch.get(), std::memory_order_release);
 		prefetch->loader = std::thread([this, path = std::move(path), identity = std::move(identity),
-		                                warm = std::move(warm), recorded = std::move(recorded)]() mutable {
+		                                warm = std::move(warm), recorded = std::move(recorded),
+		                                released = std::move(released), host_subgroup_size]() mutable {
 			LocalPlatform::SetThreadName("Kyty.Prefetch");
 			LocalPlatform::MakeBackgroundThread(std::getenv("KYTY_RENDER_CPUS"));
 			auto&      p     = *prefetch;
 			const auto begin = std::chrono::steady_clock::now();
+			// The release's recorded play (other PCs' tours of every world and players' play: the release's
+			// specialization hints, which precompile-windows.ps1 completes with this PC's seed file). A new install's prefetch
+			// went biggest first and had not reached the level's programs when the game got there: entering 1-1, the render
+			// thread translated ~490 programs (~1.1 s: a first frame of 1.1-1.2 s, 16-18 slow frames). Taken over now as
+			// from a recording of its own: a first frame of 0.4 s, 9 slow frames, none translated there.
+			bool from_release = false;
+			if (recorded.empty() && warm.empty() && !released.empty()) {
+				std::vector<std::vector<uint32_t>> pipelines;
+				from_release = LocalShaderWarmup::Cache::ReadInputs(released, recorded, pipelines) && !recorded.empty();
+				PipelineCacheLog("Shader prefetch: no recorded play on this PC: the release's {} {} ({} records)",
+				                 from_release ? "from" : "could not be read from", Common::PathToString(released),
+				                 recorded.size());
+				if (!from_release) recorded.clear();
+			}
 			if (!std::filesystem::exists(path) || !p.inputs.Open(path, identity) || p.inputs.records.empty()) {
 				PipelineCacheLog("Shader prefetch: no inputs for this GPU and driver in {} (precompile-windows.ps1 "
 				                 "writes them){}", Common::PathToString(path), recorded.empty() ? "" : ": the recording's only");
 				if (recorded.empty()) return;
 				p.inputs.records.clear();
 			}
-			const std::unordered_set<ProgramKey, ProgramKeyHash> skip(warm.begin(), warm.end());
 			for (uint32_t i = 0; i < p.inputs.records.size() && !p.stop.load(std::memory_order_relaxed); ++i) {
 				LocalShaderWarmup::Record record;
 				LocalShaderWarmup::Reader reader {p.inputs.records[i]};
 				if (!LocalShaderWarmup::Visit(reader, record) || !LocalShaderWarmup::ValidKey(record)) continue;
 				ProgramKey key {record.stage, record.hash, record.user_data_count,
 				                static_cast<uint32_t>(record.code.size()), record.static_key};
-				if (skip.contains(key)) continue;
 				auto [found, inserted] = p.index.try_emplace(key, nullptr);
 				if (inserted) {
 					auto& group      = *p.groups.emplace_back(std::make_unique<Prefetch::Group>());
@@ -1173,6 +1394,17 @@ struct PipelineCache::ProgramCache {
 				LocalShaderWarmup::Record record;
 				LocalShaderWarmup::Reader reader {recorded[i]};
 				if (!LocalShaderWarmup::Visit(reader, record) || !LocalShaderWarmup::ValidKey(record)) continue;
+				// The release's compute records hold one subgroup size for every GPU (the hints' default): this GPU's, as
+				// the precompile takes them, else none of their programs is the one a dispatch looks up (on NVIDIA 9,974
+				// of the release's 17,809 programs).
+				if (from_release && record.stage == ShaderType::Compute &&
+				    record.compute.host_subgroup_size != host_subgroup_size) {
+					record.compute.host_subgroup_size = host_subgroup_size;
+					BuildStageStaticKey(record.compute, record.static_key);
+					LocalShaderWarmup::Writer writer;
+					(void)LocalShaderWarmup::Visit(writer, record);
+					recorded[i] = std::move(writer.words);
+				}
 				ProgramKey key {record.stage, record.hash, record.user_data_count,
 				                static_cast<uint32_t>(record.code.size()), record.static_key};
 				auto [found, inserted] = p.index.try_emplace(key, nullptr);
@@ -1191,7 +1423,8 @@ struct PipelineCache::ProgramCache {
 					added++;
 				}
 				if (group.recorded == UINT32_MAX) {
-					group.recorded     = RecordedRank(i, static_cast<uint32_t>(recorded.size()));
+					// (The release's in its own order: its newest records are no place this PC played last.)
+					group.recorded     = from_release ? i : RecordedRank(i, static_cast<uint32_t>(recorded.size()));
 					group.first_record = i;
 					ranked++;
 				}
@@ -1213,9 +1446,12 @@ struct PipelineCache::ProgramCache {
 			p.gentle_threads = threads;
 			if (const char* value = std::getenv("KYTY_SHADER_PREFETCH_THREADS"); value != nullptr && *value != '\0')
 				p.gentle_threads = threads = std::clamp(static_cast<uint32_t>(std::strtoul(value, nullptr, 10)), 1u, 64u);
-			p.recorded_groups = static_cast<size_t>(std::ranges::count_if(p.groups, [](const auto& group) {
-				return group->recorded != UINT32_MAX;
-			}));
+			// (The release's play orders the work alone: it names most of the game's programs, translated on the gentle
+			// threads as without it.)
+			p.recorded_groups = from_release ? 0
+			                                 : static_cast<size_t>(std::ranges::count_if(p.groups, [](const auto& group) {
+				                                   return group->recorded != UINT32_MAX;
+			                                   }));
 			PipelineCacheLog("Shader prefetch: {} programs ({} inputs, {} of them recorded play's; {} recorded first) to "
 			                 "translate on {} threads ({} after the recorded ones), loaded in {} ms",
 			                 p.groups.size(), p.inputs.records.size(), added, ranked, threads, p.gentle_threads,
@@ -1804,6 +2040,7 @@ struct PipelineCache::ProgramCache {
 			if (!std::ranges::equal(params.code, entry->second.warm_code) ||
 			    !std::ranges::equal(params.back_code, entry->second.warm_back_code)) {
 				std::erase_if(by_program, [&](const auto& item) { return item.second.first == &entry->second; });
+				ForgetPlanLoads(entry->second);
 				// (A warmup beside the game may be making pipelines of its permutations: kept until it is done.)
 				if (warming) {
 					retired.push_back(programs.extract(entry));
@@ -2147,10 +2384,58 @@ struct PipelineCache::ProgramCache {
 		return threads;
 	}
 
-	static std::unique_ptr<WarmJob> PrepareWarmJob(vk::Device device, std::span<const uint32_t> saved) {
+	// A warm job from the translation store: the record's program's entry (of the same source), the module of its
+	// specialization and push data start, its SPIR-V read from the store's file; null when the store lacks either.
+	static std::unique_ptr<WarmJob> WarmJobFromStore(vk::Device device, const WarmStore& store,
+	                                                 LocalShaderWarmup::Record record) {
+		const ProgramKey key {record.stage, record.hash, record.user_data_count, static_cast<uint32_t>(record.code.size()),
+		                      record.static_key};
+		const auto       entry = store.found.find(key);
+		if (entry == store.found.end()) return nullptr;
+		ProgramKey stored_key;
+		uint64_t   source = 0, records_hash = 0;
+		if (!StoreEntryKey(entry->second, stored_key, source, records_hash) ||
+		    source != SourceDigest(record.code, record.back_code))
+			return nullptr;
+		std::optional<ShaderRecompiler::IR::ResourcePlan> plan;
+		std::vector<PrefetchedModule>                     modules;
+		if (!ParseStoreEntry(entry->second, plan, modules) || !plan) return nullptr;
+		// (The stored modules' specializations are canonical, as PrepareWarmJob makes the record's before compiling.)
+		ShaderRecompiler::IR::CanonicalizeSpecialization(plan->info, record.specialization);
+		const auto module = std::ranges::find_if(modules, [&](const PrefetchedModule& candidate) {
+			const auto& layout = candidate.program.bindings;
+			return candidate.specialization == record.specialization &&
+			       layout.push_data_start_dword ==
+			           ShaderRecompiler::IR::PushData::StartFor(record.push_cursor, layout.ShaderDataDwords());
+		});
+		// (The store's file keeps raw words: spirv_bytes 0.)
+		if (module == modules.end() || module->spirv_bytes != 0 || module->spirv_words == 0) return nullptr;
+		auto job    = std::make_unique<WarmJob>();
+		job->record = std::move(record);
+		job->user_data.resize(job->record.user_data_count);
+		const auto options = LocalShaderWarmup::Options(job->record, job->user_data);
+		job->result.spirv.resize(module->spirv_words);
+		if (!LocalPlatform::ReadScratchFile(store.spirv, module->spirv_offset, job->result.spirv.data(),
+		                                    module->spirv_words * sizeof(uint32_t)))
+			return nullptr;
+		job->plan = std::move(*plan);
+		if (PlanEvictionEnabled()) (void)SpillPlanBytes(job->plan, job->spilled);
+		job->info   = std::move(module->program);
+		job->module = CreateModule(device, options, job->result.spirv);
+		return job;
+	}
+
+	static std::unique_ptr<WarmJob> PrepareWarmJob(vk::Device device, std::span<const uint32_t> saved,
+	                                               const WarmStore* store) {
 		auto                      job = std::make_unique<WarmJob>();
 		LocalShaderWarmup::Reader reader {saved};
 		if (!LocalShaderWarmup::Visit(reader, job->record) || !LocalShaderWarmup::ValidKey(job->record)) return nullptr;
+		if (store != nullptr) {
+			if (auto stored = WarmJobFromStore(device, *store, job->record)) {
+				store->hits.fetch_add(1, std::memory_order_relaxed);
+				return stored;
+			}
+		}
 		job->user_data.resize(job->record.user_data_count);
 		const auto options = LocalShaderWarmup::Options(job->record, job->user_data);
 		auto translated    = ShaderRecompiler::TranslateProgram(job->record.code, options);
@@ -2184,8 +2469,9 @@ struct PipelineCache::ProgramCache {
 	class WarmWorkers {
 	public:
 		WarmWorkers(vk::Device device, std::span<const std::span<const uint32_t>> records, uint32_t threads,
-		            bool background)
-		    : device(device), records(records), jobs(records.size()), ready(records.size()), background(background) {
+		            bool background, const WarmStore* store)
+		    : device(device), records(records), jobs(records.size()), ready(records.size()), background(background),
+		      store(store) {
 			for (uint32_t t = 0; t < threads; ++t) pool.emplace_back([this] { Run(); });
 		}
 		~WarmWorkers() {
@@ -2223,7 +2509,7 @@ struct PipelineCache::ProgramCache {
 				}
 				if (stop.load(std::memory_order_relaxed)) return;
 				const size_t index = WarmOrder(n, jobs.size(), background);
-				jobs[index]        = PrepareWarmJob(device, records[index]);
+				jobs[index]        = PrepareWarmJob(device, records[index], store);
 				ready[index].store(1, std::memory_order_release);
 				ready[index].notify_one();
 			}
@@ -2233,6 +2519,7 @@ struct PipelineCache::ProgramCache {
 		std::vector<std::unique_ptr<WarmJob>>      jobs;
 		std::vector<std::atomic<uint8_t>>          ready;
 		bool                                       background = false;
+		const WarmStore*                           store      = nullptr;
 		std::atomic<size_t>                        taken {0};
 		std::atomic<size_t>                        consumed {0};
 		std::atomic<bool>                          stop {false};
@@ -2264,8 +2551,10 @@ struct PipelineCache::ProgramCache {
 	// `mutex` (the pipeline cache's) by this thread alone - a worker below normal priority holding it while the game's
 	// threads kept every CPU would hold up the render thread. The game's Get may have made the program meanwhile, or
 	// the permutation: a record then adds what the program lacks, of the same code only.
-	void TranslateWarmup(Common::Mutex& mutex, bool background, const std::atomic<bool>& stop) {
+	void TranslateWarmup(Common::Mutex& mutex, bool background, const std::atomic<bool>& stop,
+	                     const std::filesystem::path& inputs_path) {
 		const auto begin = std::chrono::steady_clock::now();
+		OpenWarmStore(inputs_path);
 		// 0 means all recorded inputs. A caller can explicitly bound startup time.
 		uint32_t budget_seconds = 0;
 		if (const char* value = std::getenv("KYTY_SHADER_WARMUP_SECONDS"); value && *value) {
@@ -2297,7 +2586,7 @@ struct PipelineCache::ProgramCache {
 		size_t compiled = 0, left = 0;
 		const uint32_t threads = WarmupThreads(background);
 		std::optional<WarmWorkers> workers;
-		if (threads > 1 || background) workers.emplace(device, warm_records, threads, background);
+		if (threads > 1 || background) workers.emplace(device, warm_records, threads, background, warm_store.get());
 		for (size_t n = 0; n < count; ++n) {
 			if (stop.load(std::memory_order_relaxed) || std::chrono::steady_clock::now() >= translate_deadline) {
 				left = count - n;
@@ -2306,7 +2595,7 @@ struct PipelineCache::ProgramCache {
 			if (!background) StartupProgress::Report("Preparing shaders", n, count);
 			warm_done.store(n, std::memory_order_relaxed);
 			const size_t index = WarmOrder(n, count, background);
-			const auto   job   = workers ? workers->Take(index) : PrepareWarmJob(device, warm_records[index]);
+			const auto   job   = workers ? workers->Take(index) : PrepareWarmJob(device, warm_records[index], warm_store.get());
 			if (!job) continue;
 			auto&          record = job->record;
 			const uint64_t digest = SourceDigest(record.code, record.back_code);
@@ -2352,14 +2641,17 @@ struct PipelineCache::ProgramCache {
 			if (++compiled % 1000 == 0) PipelineCacheLog("Shader warmup: compiling {}/{}", compiled, count);
 		}
 		workers.reset();
-		PipelineCacheLog("Shader warmup: compiled {}/{} permutations in {} ms ({} threads{}); {} records left to the shader "
-		    "prefetch", compiled, count,
+		const size_t from_store = warm_store ? warm_store->hits.load(std::memory_order_relaxed) : 0;
+		CloseWarmStore();
+		PipelineCacheLog("Shader warmup: compiled {}/{} permutations in {} ms ({} threads{}, {} from the translation store); "
+		    "{} records left to the shader prefetch", compiled, count,
 		    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin).count(),
-		    threads, background ? ", beside the game" : "", left);
+		    threads, background ? ", beside the game" : "", from_store, left);
 	}
 	LocalShaderWarmup::Cache warmup;
 	// The warmup's view of the recording (LoadWarmup), each record's permutation (TranslateWarmup) and the keys of the
-	// programs it made (the shader prefetch leaves their static inputs out); all freed once it is done.
+	// programs it made (chen's prefetch leaves their static inputs out; ours translates them too, so the store holds
+	// them: StartPrefetch); all freed once it is done.
 	std::vector<std::span<const uint32_t>> warm_records;
 	std::vector<std::vector<uint32_t>>     warm_recipes;
 	std::vector<ProgramKey>                warm_keys;
@@ -2539,11 +2831,13 @@ void PipelineCache::BuildOptimized(Pipeline& pipeline, std::function<void(Pipeli
 	auto layouts       = pipeline;
 	layouts.pipeline   = nullptr;
 	layouts.optimized  = nullptr;
+	m_pipelines_building.fetch_add(1, std::memory_order_relaxed);
 	OptimizeWorkers().Push([this, optimized = pipeline.optimized, layouts, build = std::move(build)]() mutable {
 		if (!m_stopping.load(std::memory_order_relaxed)) build(layouts);
 		optimized->pipeline = layouts.pipeline;
 		optimized->done.store(true, std::memory_order_release);
 		m_optimized_builds.fetch_add(1, std::memory_order_release);
+		m_pipelines_building.fetch_sub(1, std::memory_order_relaxed);
 		MainPipelineDone();
 	});
 }
@@ -2603,8 +2897,10 @@ void PipelineCache::ReportSession() {
 	}
 	PipelineCacheLog("Pipelines compiled unoptimized first: {}, replaced by their optimized build: {}",
 	                 m_unoptimized_builds, m_replaced_pipelines.size());
-	PipelineCacheLog("Shader plans: {} out of memory at the end, {} brought back", m_program_cache->plans_out,
-	                 m_program_cache->plan_reloads);
+	PipelineCacheLog("Shader plans: {} out of memory at the end, {} brought back by the render thread, {} beside it ({} of "
+	                 "those used)",
+	                 m_program_cache->plans_out, m_program_cache->plan_reloads, m_program_cache->plan_preloads,
+	                 m_program_cache->plan_preload_uses);
 	PipelineCacheLog("Made where first needed: {} programs translated ({:.0f} ms), {} pipelines ({:.0f} ms)",
 	                 m_program_cache->render_translations, m_program_cache->render_translate_ms, m_render_pipelines,
 	                 m_render_pipeline_ms);
@@ -2647,7 +2943,7 @@ void PipelineCache::ReportObjects(uint64_t id) const {
 	const auto* prefetch = m_program_cache->prefetch_live.load(std::memory_order_acquire);
 	std::printf("LIVE_PIPELINE_OBJECTS id=%llu graphics_pipelines=%zu compute_pipelines=%zu pending_graphics=%zu pending_compute=%zu "
 	            "replaced_unoptimized=%zu optimizing=%zu programs=%zu jit_bytes=%zu stored_modules=%llu stored_spirv_mib=%llu "
-	            "store_file_mib=%llu store_loads=%llu store_load_misses=%llu plans_out=%zu plan_reloads=%llu prefetch_adopted=%zu "
+	            "store_file_mib=%llu store_loads=%llu store_load_misses=%llu plans_out=%zu plan_reloads=%llu plan_preloads=%llu plan_preload_uses=%llu prefetch_adopted=%zu "
 	            "prefetch_claimed=%zu prefetch_taken=%zu prefetch_take_early=%zu prefetch_finished=%zu prefetch_followed=%zu render_translations=%llu "
 	            "render_translate_ms=%.0f render_pipelines=%llu render_pipeline_ms=%.0f warmup_phase=%u\n",
 	            static_cast<unsigned long long>(id), m_graphics_pipelines.size(), m_compute_pipelines.size(), m_pending_graphics_pipelines.size(),
@@ -2656,6 +2952,8 @@ void PipelineCache::ReportObjects(uint64_t id) const {
 	            static_cast<unsigned long long>(store.spirv_bytes >> 20u), static_cast<unsigned long long>(store.stored_bytes >> 20u),
 	            static_cast<unsigned long long>(store.loads), static_cast<unsigned long long>(store.load_misses),
 	            m_program_cache->plans_out, static_cast<unsigned long long>(m_program_cache->plan_reloads),
+	            static_cast<unsigned long long>(m_program_cache->plan_preloads),
+	            static_cast<unsigned long long>(m_program_cache->plan_preload_uses),
 	            prefetch ? prefetch->adopted : size_t {0}, prefetch ? prefetch->claimed : size_t {0},
 	            prefetch ? prefetch->taken : size_t {0}, prefetch ? prefetch->take_early : size_t {0},
 	            prefetch ? prefetch->finished.load() : size_t {0}, prefetch ? prefetch->followed.load() : size_t {0},
@@ -2780,12 +3078,11 @@ void PipelineCache::RunWarmup(WarmupSettings settings) {
 	const auto memory_before = LocalPlatform::ProcessMemory();
 	m_graphics.RefreshMemoryBudget();
 	const auto video_before = m_graphics.GetDeviceMemoryUsage();
-	if (settings.compile_shaders) programs.TranslateWarmup(m_mutex, settings.background, m_warmup_stop);
-	// (The recording's records the warmup did not translate: the shader prefetch's first.)
+	if (settings.compile_shaders) programs.TranslateWarmup(m_mutex, settings.background, m_warmup_stop, StaticInputsPath());
+	// (The recording's records: the shader prefetch's first, those the warmup translated too, so that the translation
+	// store holds them for the next launch's warmup.)
 	std::vector<std::vector<uint32_t>> recorded_inputs;
-	for (size_t i = 0; i < programs.warm_records.size(); ++i)
-		if (i >= programs.warm_permutations.size() || programs.warm_permutations[i] == nullptr)
-			recorded_inputs.emplace_back(programs.warm_records[i].begin(), programs.warm_records[i].end());
+	for (const auto& record: programs.warm_records) recorded_inputs.emplace_back(record.begin(), record.end());
 	const auto memory_shaders = LocalPlatform::ProcessMemory();
 	if (settings.warm_pipelines && !m_warmup_stop.load(std::memory_order_relaxed)) {
 		const auto pipelines_begin = std::chrono::steady_clock::now();
@@ -2837,16 +3134,31 @@ void PipelineCache::RunWarmup(WarmupSettings settings) {
 	if (!m_warmup_stop.load(std::memory_order_relaxed)) StartShaderPrefetch(std::move(recorded_inputs));
 }
 
-// KYTY_SHADER_PREFETCH (default on; 0 off): ProgramCache::StartPrefetch, the warmup's programs left out.
+// KYTY_SHADER_PREFETCH (default on; 0 off): ProgramCache::StartPrefetch.
 void PipelineCache::StartShaderPrefetch(std::vector<std::vector<uint32_t>> recorded_inputs) {
 	const char* prefetch = std::getenv("KYTY_SHADER_PREFETCH");
 	if ((prefetch != nullptr && std::string_view(prefetch) == "0") || KYTY_BUILD != KYTY_BUILD_RELEASE ||
 	    PipelineCacheTitleId().empty())
 		return;
 	auto identity = PipelineCacheTitleId() + ShaderInputDeviceSignature(m_graphics.GetPhysicalDeviceProperties());
+	// The release's recorded play for a PC without its own (KYTY_PREFETCH_RELEASE=0: not): next to the seed file
+	// precompile-windows.ps1 used, released-<title>_<version>.seeds (the package's folder, or _Build\static-precompile in a
+	// source tree).
+	std::filesystem::path released;
+	if (const char* value = std::getenv("KYTY_PREFETCH_RELEASE"); value == nullptr || std::string_view(value) != "0") {
+		const auto      name = "released-" + PipelineCacheGameId() + ".seeds";
+		std::error_code error;
+		for (const auto& candidate: {std::filesystem::path(name), std::filesystem::path("_Build") / "static-precompile" / name}) {
+			if (std::filesystem::is_regular_file(candidate, error)) {
+				released = candidate;
+				break;
+			}
+		}
+	}
 	Common::LockGuard lock(m_mutex);
 	m_program_cache->StartPrefetch(StaticInputsPath(), std::move(identity), std::move(m_program_cache->warm_keys),
-	                               std::move(recorded_inputs));
+	                               std::move(recorded_inputs), std::move(released),
+	                               m_graphics.SupportsComputeWave64() ? 64u : 32u);
 }
 
 PipelineCache::PrefetchProgress PipelineCache::GetPrefetchProgress() const {
@@ -2862,7 +3174,8 @@ PipelineCache::PrefetchProgress PipelineCache::GetPrefetchProgress() const {
 	const auto done  = std::min(prefetch->finished.load(std::memory_order_relaxed), total);
 	// Most of them kept in the translation store: read from it, not translated (the HUD says so).
 	const bool from_disk = prefetch->store_matched * 2 >= total && total != 0;
-	return {done, total, from_disk && done < total ? "Loading shaders from disk" : nullptr};
+	return {done, total, from_disk && done < total ? "Loading shaders from disk" : nullptr,
+	        from_disk ? total - prefetch->store_matched : 0};
 }
 
 void PipelineCache::WarmPipelines(uint64_t compute_video, bool background) {
@@ -3835,8 +4148,10 @@ PipelineCache::Pipeline* PipelineCache::CreateGraphicsPipelineImpl(
 			                       job->native_bindings);
 			if (table) TablePipelineDone();
 			else MainPipelineDone();
+			m_pipelines_building.fetch_sub(1, std::memory_order_relaxed);
 			job->done.store(true, std::memory_order_release);
 		});
+		m_pipelines_building.fetch_add(1, std::memory_order_relaxed);
 		LiveCounters::Add(LiveCounters::AsyncPipelines);
 		m_pipeline_waiting = std::shared_ptr<const std::atomic<bool>>(job, &job->done);
 		return nullptr;
@@ -3997,8 +4312,10 @@ PipelineCache::Pipeline* PipelineCache::TryCreateComputePipeline(const ShaderCom
 		CreatePipelineInternal(m_graphics, *job->pipeline, job->input_info, job->module, TablePipelineCache(),
 		                       PipelineBuild::Full, true);
 		TablePipelineDone();
+		m_pipelines_building.fetch_sub(1, std::memory_order_relaxed);
 		job->done.store(true, std::memory_order_release);
 	});
+	m_pipelines_building.fetch_add(1, std::memory_order_relaxed);
 	LiveCounters::Add(LiveCounters::AsyncPipelines);
 	m_pipeline_waiting = std::shared_ptr<const std::atomic<bool>>(job, &job->done);
 	return nullptr;

@@ -106,6 +106,9 @@ public:
 		return image.IsDefinitelyCpuDirty() && DirtyForView(image, desc);
 	}
 	[[nodiscard]] vk::ImageView FindRenderTarget(ImageId id, const ImageDesc& desc);
+	// FindRenderTarget, null instead of ending the emulator when the image is no longer a usable target (unregistered,
+	// or to be bound again, since it was found): the caller finds it again.
+	[[nodiscard]] vk::ImageView TryFindRenderTarget(ImageId id, const ImageDesc& desc);
 	[[nodiscard]] vk::ImageView FindDepthTarget(ImageId id, const ImageDesc& desc);
 	[[nodiscard]] Image&        GetImage(ImageId id) {
 		auto& image = m_slot_images[id];
@@ -200,7 +203,7 @@ private:
 	// Resolution epoch of the last (un)registration per image page.
 	using ImageEpochTable = MultiLevelPageTable<uint64_t, 20, 40, 10>;
 
-	[[nodiscard]] ImageId     InsertImage(const ImageInfo& info);
+	[[nodiscard]] ImageId     InsertImage(const ImageInfo& info, bool host_memory = false);
 	[[nodiscard]] ImageId     GetNullImage(const ImageDesc& desc);
 	void                      RegisterImage(ImageId id);
 	void                      UnregisterImage(ImageId id);
@@ -234,6 +237,17 @@ private:
 	void                      NoteGuestAlias(const ImageInfo& requested, Image& kept);
 	void                      FreeGuestAliases(ImageId written);
 	void                      ParkImage(ImageId id);
+	// A GPU-written image the collector cannot evict moved to system memory (its contents copied by the GPU); false
+	// when it cannot be (bound, depth, there already, no system memory for it). (NVIDIA makes no image in system
+	// memory: SwapOutImage there.)
+	bool                      DemoteImage(ImageId id);
+	// A GPU-written image the collector cannot evict swapped out: its pixels copied by the GPU into a buffer in system
+	// memory (the Vulkan image's own layout, level by level: no tiling), the image deleted; a new image over the same
+	// guest bytes with the same description gets them back (RestoreSwapped, from InitializeImage) unless the game wrote
+	// those bytes meanwhile (their hash). False when it cannot be (bound, depth, multisampled, no buffer, the limit).
+	bool                      SwapOutImage(ImageId id);
+	bool                      RestoreSwapped(ImageId id);
+	void                      DropSwapped(uint64_t address, uint64_t size); // the entries over [address, address + size)
 	[[nodiscard]] ImageId     TakeParkedImage(const ImageInfo& info);
 	void                      FreeImage(ImageId id, const char* site = "");
 	void                      TouchImage(Image& image);
@@ -390,6 +404,20 @@ private:
 	uint64_t                                          m_gc_skipped_tiled   = 0; // candidates kept: GPU-written tiled,
 	uint64_t                                          m_gc_skipped_unsafe  = 0; // ... not safe to download,
 	uint64_t                                          m_gc_skipped_download = 0; // ... download refused
+	uint64_t                                          m_gc_demotions       = 0; // moved to system memory (DemoteImage)
+	uint64_t                                          m_gc_demoted_bytes   = 0;
+	struct SwappedImage {
+		ImageInfo                        info;
+		std::vector<vk::BufferImageCopy> copies;
+		VkBuffer                         buffer     = VK_NULL_HANDLE;
+		VmaAllocation                    allocation = nullptr;
+		uint64_t                         bytes      = 0;
+		uint64_t                         guest_hash = 0; // HashGuestRange at the swap-out
+	};
+	std::unordered_map<uint64_t, SwappedImage>        m_swapped; // by guest address (SwapOutImage)
+	uint64_t                                          m_swapped_bytes      = 0;
+	uint64_t                                          m_gc_swapouts        = 0, m_gc_swapout_bytes = 0, m_gc_restores = 0,
+	                                                  m_gc_swap_stale      = 0;
 	std::chrono::steady_clock::time_point             m_inventory_logged {};
 	uint32_t                                          m_inventory_count = 0;
 	void                                              LogImageClasses() const;

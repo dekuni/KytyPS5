@@ -103,7 +103,8 @@ qint64 seedPipelines(const QString& path) {
 StaticState staticState(const Package& package, const QString& cacheId) {
 	if (cacheId.isEmpty()) return StaticState::None;
 	const QDir static_dir(package.path(QStringLiteral("_PipelineCache/static")));
-	for (const QFileInfo& file: static_dir.entryInfoList({cacheId + QStringLiteral(".shard*")}, QDir::Files)) {
+	// (The shards are named after the store they join: <cacheId>.binaries.shard3of214-<seeds>.)
+	for (const QFileInfo& file: static_dir.entryInfoList({cacheId + QStringLiteral("*.shard*")}, QDir::Files)) {
 		if (file.size() > 1024 * 1024) return StaticState::Partial;
 	}
 	for (const char* extension: {".binaries", ".bin", ".blobs"}) {

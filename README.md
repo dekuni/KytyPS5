@@ -4,7 +4,7 @@ A Windows build of the KytyPS5 PlayStation 5 emulator, tuned for one game: **Dem
 
 [chenxiao07's Demon's Souls branch of KytyPS5](https://github.com/chenxiao07/KytyPS5) is the foundation of this
 fork: the table path (GPU-driven draws), native XPR, the shader precompile, the graphics presets, the DualSense
-support and much more are his work. This fork builds on his commit `30d2d2cb` and adds **10-22%
+support and much more are his work. This fork builds on his v20261016b (commit `efc1efc7`) and adds **10-22%
 more speed** ([measured](#performance) against chen's own build), its own launcher, 1080p
 output modes, more graphics options and fixes, listed [below](#what-this-fork-adds).
 
@@ -76,7 +76,15 @@ Everything below sits on top of chen's work, which remains the foundation.
    13% slower. Built from an older community-hosted FSR 4 "v07" source; **not AMD's official FSR 4**.
 9. **FSR 3.1 frame generation** (AMD FidelityFX, any GPU), with the HUD kept out of generated frames.
 10. **A faster memory allocator** (mimalloc) behind the emulator's own allocations: +1.4-2.5%.
-11. **Fixes.** A crash in the ATRAC9 audio decoder at the Shrine of Storms; 7.1 sound folded down to stereo
+11. **Video memory kept under the card's budget.** A 12 GB card was treated as a small one (its usable budget reads
+    under 12 GB), which parked textures outside the counted memory and left the card paging in a new game and in
+    boss fights; textures the GPU made, which no collector could evict, are now swapped out to RAM under pressure
+    and restored when the game uses them again (RAM, not video memory, pays).
+12. **Keyboard and mouse play.** The mouse turns the camera in proportion to its speed (sensitivity in the
+    launcher), the first click in the window takes it and Esc gives it back; the mouse buttons attack, block and
+    lock on, the wheel switches spells and items; a PC key layout (Space rolls, E interacts, R uses the item, F
+    two-hands). See docs/PORTABLE-README.md, Controls.
+13. **Fixes.** A crash from the pause menu (a render target found again before use); a crash in the ATRAC9 audio decoder at the Shrine of Storms; 7.1 sound folded down to stereo
     when your output is not 7.1, and the game's ambisonic sound objects decoded into the 7.1 mix; the game's
     file reads on its own threads (a movie froze with the background reader); a translation store that grew at
     every launch.

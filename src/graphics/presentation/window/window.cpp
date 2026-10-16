@@ -354,6 +354,10 @@ static void GameEventMouse([[maybe_unused]] const EventMouse& mb) {
 	}
 #endif
 
+	if (mb.wheel && !mb.touch) {
+		HostInputMouseWheel(mb.y);
+		return;
+	}
 	if (mb.down || mb.up) {
 		uint8_t mouse_button = 0;
 		if (mb.left) {
@@ -519,9 +523,11 @@ void WindowContext::ProcessWindowEvent(const SDL_WindowEvent& event) {
 			break;
 		case SDL_WINDOWEVENT_FOCUS_GAINED:
 			LOGF("Window %" PRIu32 " gained keyboard focus\n", window_event.windowID);
+			HostInputFocus(true);
 			break;
 		case SDL_WINDOWEVENT_FOCUS_LOST:
 			LOGF("Window %" PRIu32 " lost keyboard focus\n", window_event.windowID);
+			HostInputFocus(false);
 			break;
 		case SDL_WINDOWEVENT_CLOSE:
 			LOGF("Window %" PRIu32 " closed\n", window_event.windowID);
@@ -569,6 +575,12 @@ void WindowContext::ProcessEvent(double time_s) {
 		if (event->type == SDL_KEYDOWN && event->key.repeat == 0) {
 			HostInputToggleMouseToJoystick();
 		}
+		return;
+	}
+	// Esc frees the mouse from the camera (held: the key goes no further).
+	if ((event->type == SDL_KEYDOWN || event->type == SDL_KEYUP) && event->key.keysym.sym == SDLK_ESCAPE &&
+	    HostInputMouseCaptured()) {
+		if (event->type == SDL_KEYDOWN && event->key.repeat == 0) HostInputReleaseMouse();
 		return;
 	}
 	if ((event->type == SDL_KEYDOWN || event->type == SDL_KEYUP) &&

@@ -235,6 +235,32 @@ void NameImageBinding(GraphicContext& graphics, Image& image, vk::ImageView view
 
 namespace {
 constexpr uint32_t ImageGranuleBits  = 16;
+// KYTY_GC_SWAP (default on; 0 off): under pressure, the collector swaps GPU-written images it cannot evict out to
+// system memory (TextureCache::SwapOutImage) instead of keeping them in video memory for good. KYTY_GC_SWAP_MB: the
+// most it holds swapped out (default 3072).
+static bool SwapEnabled() {
+	static const bool enabled = [] {
+		const char* value = std::getenv("KYTY_GC_SWAP");
+		return value == nullptr || value[0] != '0';
+	}();
+	return enabled;
+}
+static uint64_t SwapLimit() {
+	static const uint64_t limit = [] {
+		const char* value = std::getenv("KYTY_GC_SWAP_MB");
+		return (value != nullptr && std::strtoull(value, nullptr, 10) > 0 ? std::strtoull(value, nullptr, 10) : 3072) << 20u;
+	}();
+	return limit;
+}
+// KYTY_GC_DEMOTE=1: instead, images moved to system memory as images (DemoteImage); NVIDIA makes none there.
+static bool DemoteEnabled() {
+	static const bool enabled = [] {
+		const char* value = std::getenv("KYTY_GC_DEMOTE");
+		return value != nullptr && value[0] == '1';
+	}();
+	return enabled;
+}
+
 // KYTY_GC_COLLECTOR=chen: his texture collector (10-09); otherwise ours (RunGarbageCollector).
 static bool ChenCollector() {
 	static const bool chen = [] {
@@ -245,6 +271,10 @@ static bool ChenCollector() {
 }
 
 constexpr uint64_t ImageGranuleSpace = uint64_t {1} << 40; // the image page table's address space
+} // namespace
+
+namespace {
+[[nodiscard]] uint64_t HashGuestRange(uint64_t vaddr, uint64_t size); // (below: SwapOutImage and RestoreSwapped use it)
 } // namespace
 
 static TextureCache* g_report_cache = nullptr;
@@ -372,6 +402,8 @@ uint64_t KytyGcLiveBudgetValue(const GraphicContext& graphics) {
 TextureCache::~TextureCache() {
 	LiveCounters::g_image_report = nullptr;
 	g_report_cache               = nullptr;
+	for (auto& [address, swapped]: m_swapped) vmaDestroyBuffer(m_graphics.allocator, swapped.buffer, swapped.allocation);
+	m_swapped.clear();
 	m_slot_images.ForEach([&](ImageId id, const Image& image) {
 		if (image.registered) {
 			UnregisterImage(id);
@@ -434,8 +466,8 @@ bool TextureCache::SafeToDownload(const Image& image) {
 	return !m_buffer_cache.HasGpuDirtyBytes(range.address, range.size);
 }
 
-ImageId TextureCache::InsertImage(const ImageInfo& info) {
-	const auto id = m_slot_images.insert(m_graphics, m_scheduler, info);
+ImageId TextureCache::InsertImage(const ImageInfo& info, bool host_memory) {
+	const auto id = m_slot_images.insert(m_graphics, m_scheduler, info, host_memory);
 	if (!info.data.Empty()) {
 		RegisterImage(id);
 	}
@@ -1408,6 +1440,169 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested, BindingTyp
 	return replacement_id;
 }
 
+// A GPU-written tiled image the collector cannot evict (its bytes only the GPU has, and a tiled image has no download)
+// moved to system memory: a new image there, the contents copied by the GPU, the usage, the page watch and the
+// GPU-modified state carried over (the overlap replacement's steps, FindImage), the old image parked (retired a flip
+// on). Sampling it costs more over the bus, which a cold image does not mind; video memory for the working set is what
+// the card lacked (10-15, a boss fight after a new game: 2.5 GB of such images, the collector freeing nothing while the
+// driver paged, the GPU stalling 360 ms every few seconds).
+bool TextureCache::DemoteImage(ImageId cached_id) {
+	{
+		const auto& cached = m_slot_images[cached_id];
+		if (!cached.registered || cached.depth_id || cached.host_memory || cached.binding.is_bound ||
+		    cached.binding.is_target || cached.info.data.Empty())
+			return false;
+	}
+	auto info             = m_slot_images[cached_id].info;
+	info.htile_clear_mask = 0;
+	const auto replacement_id = InsertImage(info, true); // (may move the slots: references taken after)
+	auto& replacement         = m_slot_images[replacement_id];
+	auto& cached              = m_slot_images[cached_id];
+	if (!replacement.host_memory || replacement.backing.image == nullptr ||
+	    replacement.backing.samples != cached.backing.samples) {
+		static std::atomic<uint32_t> reported {0};
+		if (reported.fetch_add(1, std::memory_order_relaxed) < 4)
+			std::printf("TextureCache: no system memory for a demoted image (%s, 0x%llx, %llu bytes)\n",
+			            replacement.backing.image == nullptr ? "not created" : !replacement.host_memory ? "not host memory" : "samples",
+			            static_cast<unsigned long long>(info.data.address), static_cast<unsigned long long>(info.data.size));
+		if (replacement.backing.image != nullptr) DeleteImage(replacement_id);
+		else {
+			(void)DetachImage(replacement_id);
+			RetireImage(replacement_id);
+		}
+		return false;
+	}
+	replacement.usage = cached.usage;
+	CopyImage(replacement_id, cached_id); // (marks the replacement GPU-modified, as the source is)
+	if (cached.IsTracked() && !replacement.IsTracked() && replacement.info.data.address == cached.info.data.address &&
+	    replacement.info.data.size == cached.info.data.size) {
+		replacement.track_addr      = cached.track_addr;
+		replacement.track_addr_end  = cached.track_addr_end;
+		replacement.untracked_holes = std::move(cached.untracked_holes);
+		cached.untracked_holes.clear();
+		cached.track_addr     = 0;
+		cached.track_addr_end = 0;
+	}
+	m_gc_demoted_bytes += cached.AccountedSize();
+	++m_gc_demotions;
+	ParkImage(cached_id);
+	return true;
+}
+
+bool TextureCache::SwapOutImage(ImageId id) {
+	auto& image = m_slot_images[id];
+	if (!image.registered || image.depth_id || image.info.data.Empty() || image.info.IsDepth() || image.info.HasStencil() ||
+	    image.backing.image == nullptr || image.backing.samples != 1 || image.binding.is_bound || image.binding.is_target ||
+	    image.info.metadata.compression != VideoOutCompression::Uncompressed || image.info.bytes_per_block == 0)
+		return false;
+	const auto&    backing = image.backing;
+	const uint32_t block   = image.info.IsBlock() ? 4u : 1u;
+	// Every level, its layers (a volume: its depth) in one copy, packed one after the other (offsets 16-aligned: a
+	// multiple of any texel block).
+	std::vector<vk::BufferImageCopy> copies;
+	uint64_t                         offset = 0;
+	for (uint32_t level = 0; level < backing.mip_levels; ++level) {
+		const uint32_t width  = std::max(backing.extent.width >> level, 1u);
+		const uint32_t height = std::max(backing.extent.height >> level, 1u);
+		const bool     volume = backing.image_type == vk::ImageType::e3D;
+		const uint32_t depth  = volume ? std::max(backing.extent.depth >> level, 1u) : 1u;
+		const uint32_t layers = volume ? 1u : backing.layers;
+		const uint64_t bytes  = uint64_t {(width + block - 1) / block} * ((height + block - 1) / block) *
+		                       image.info.bytes_per_block * depth * layers;
+		vk::BufferImageCopy copy {};
+		copy.bufferOffset     = offset;
+		copy.imageSubresource = {vk::ImageAspectFlagBits::eColor, level, 0, layers};
+		copy.imageExtent      = {width, height, depth};
+		copies.push_back(copy);
+		offset = (offset + bytes + 15) & ~uint64_t {15};
+	}
+	const uint64_t bytes = offset;
+	if (bytes == 0 || m_swapped_bytes + bytes > SwapLimit()) return false;
+	// The buffer, in system memory for real: the host-visible types that are not device-local.
+	uint32_t    types      = 0;
+	const auto& properties = m_graphics.GetPhysicalDeviceMemoryProperties();
+	for (uint32_t i = 0; i < properties.memoryTypeCount; i++) {
+		const auto flags = properties.memoryTypes[i].propertyFlags;
+		if ((flags & vk::MemoryPropertyFlagBits::eHostVisible) && !(flags & vk::MemoryPropertyFlagBits::eDeviceLocal))
+			types |= 1u << i;
+	}
+	if (types == 0) return false;
+	vk::BufferCreateInfo create {};
+	create.size  = bytes;
+	create.usage = vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst;
+	VmaAllocationCreateInfo allocate {};
+	allocate.usage          = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+	allocate.requiredFlags  = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+	allocate.memoryTypeBits = types;
+	VkBuffer      buffer     = VK_NULL_HANDLE;
+	VmaAllocation allocation = nullptr;
+	const auto    raw        = static_cast<VkBufferCreateInfo>(create);
+	if (vmaCreateBuffer(m_graphics.allocator, &raw, &allocate, &buffer, &allocation, nullptr) != VK_SUCCESS) return false;
+	const auto address = image.info.data.address;
+	DropSwapped(address, image.info.data.size); // (an older entry over these bytes)
+	image.Download(copies, vk::Buffer(buffer), 0, bytes);
+	auto& swapped      = m_swapped[address];
+	swapped.info       = image.info;
+	swapped.copies     = std::move(copies);
+	swapped.buffer     = buffer;
+	swapped.allocation = allocation;
+	swapped.bytes      = bytes;
+	swapped.guest_hash = HashGuestRange(address, image.info.data.size);
+	m_swapped_bytes += bytes;
+	m_gc_swapout_bytes += bytes;
+	++m_gc_swapouts;
+	// Its pixels are in the buffer now: deleted without a download, as an image whose bytes the guest holds.
+	image.ClearGpuModified();
+	DeleteImage(id);
+	return true;
+}
+
+bool TextureCache::RestoreSwapped(ImageId id) {
+	auto& image = m_slot_images[id];
+	const auto found = m_swapped.find(image.info.data.address);
+	if (found == m_swapped.end()) return false;
+	auto&      swapped = found->second;
+	const bool same    = swapped.info.data == image.info.data && swapped.info.pixel_format == image.info.pixel_format &&
+	                  swapped.info.extent == image.info.extent && swapped.info.resources == image.info.resources &&
+	                  swapped.info.type == image.info.type && swapped.info.tile_mode == image.info.tile_mode &&
+	                  image.backing.samples == 1 && image.backing.mip_levels == swapped.copies.size() &&
+	                  image.info.bytes_per_block == swapped.info.bytes_per_block;
+	const bool fresh = same && HashGuestRange(image.info.data.address, image.info.data.size) == swapped.guest_hash;
+	if (fresh) {
+		image.Upload(swapped.copies, vk::Buffer(swapped.buffer), 0, swapped.bytes);
+		if (image.IsCpuDirty()) image.RefreshComplete();
+		image.ClearBufferModified();
+		image.MarkGpuModified();
+		++m_gc_restores;
+	} else {
+		++m_gc_swap_stale;
+	}
+	// The buffer freed once the GPU is done with the upload.
+	m_scheduler.DeferOperation([allocator = m_graphics.allocator, buffer = swapped.buffer, allocation = swapped.allocation] {
+		vmaDestroyBuffer(allocator, buffer, allocation);
+	});
+	m_swapped_bytes -= swapped.bytes;
+	m_swapped.erase(found);
+	return fresh;
+}
+
+void TextureCache::DropSwapped(uint64_t address, uint64_t size) {
+	if (m_swapped.empty()) return;
+	const auto end = address + size;
+	for (auto it = m_swapped.begin(); it != m_swapped.end();) {
+		const auto& range = it->second.info.data;
+		if (range.address < end && address < range.End()) {
+			m_scheduler.DeferOperation([allocator = m_graphics.allocator, buffer = it->second.buffer, allocation = it->second.allocation] {
+				vmaDestroyBuffer(allocator, buffer, allocation);
+			});
+			m_swapped_bytes -= it->second.bytes;
+			it = m_swapped.erase(it);
+		} else {
+			++it;
+		}
+	}
+}
+
 // (FreeImage's, but parked: TakeParkedImage takes it back for its description; the collector retires it a flip on.)
 void TextureCache::ParkImage(ImageId id) {
 	auto& image = m_slot_images[id];
@@ -1959,6 +2154,8 @@ void TextureCache::InitializeImage(ImageId id) {
 	DeferredImageProtects protects {m_buffer_cache, m_page_manager};
 	protects.Track([&] { TrackImage(id); });
 	marks[1] = Clock::now();
+	// Swapped out by the collector: its pixels back from the buffer (RestoreSwapped), no upload from the guest's bytes.
+	if (!m_swapped.empty() && RestoreSwapped(id)) return;
 	if (image.info.metadata.compression != VideoOutCompression::Uncompressed) {
 		if (image.IsCpuDirty()) {
 			FinishRefresh(image);
@@ -3249,14 +3446,18 @@ vk::ImageView TextureCache::FindTexture(ImageId id, const ImageDesc& desc) {
 }
 
 vk::ImageView TextureCache::FindRenderTarget(ImageId id, const ImageDesc& desc) {
+	const auto view = TryFindRenderTarget(id, desc);
+	if (view == nullptr) EXIT("TextureCache: color target requires rediscovery before final acquisition\n");
+	return view;
+}
+
+vk::ImageView TextureCache::TryFindRenderTarget(ImageId id, const ImageDesc& desc) {
 	if (desc.type != BindingType::RenderTarget) {
 		EXIT("TextureCache: invalid color-target binding\n");
 	}
 	std::scoped_lock lock {m_lock};
 	auto&            image = m_slot_images[id];
-	if (!image.registered || image.depth_id || image.binding.needs_rebind) {
-		EXIT("TextureCache: color target requires rediscovery before final acquisition\n");
-	}
+	if (!image.registered || image.depth_id || image.binding.needs_rebind) return nullptr;
 	TouchImage(image);
 	image.MarkGpuModified();
 	if (!image.usage.render_target) ++image.validity;
@@ -4096,6 +4297,7 @@ void TextureCache::UnmapMemory(uint64_t address, uint64_t size) {
 	}, SlowLog::HitchThreshold());
 	std::scoped_lock lock {m_lock};
 	const auto       end = address + size;
+	DropSwapped(address, size);
 	bool             erased_metadata = false;
 	for (auto metadata = m_surface_metas.lower_bound(address);
 	     metadata != m_surface_metas.end() && metadata->first < end;) {
@@ -4282,7 +4484,7 @@ void TextureCache::RunGarbageCollector() {
 		m_inventory_logged = now;
 		static uint64_t last_registrations = 0, last_deletions = 0, last_buffer_registrations = 0, last_buffer_deletions = 0,
 		                last_collections = 0;
-		LOGF("Video memory: %s; collections %llu; images %llu MiB (%llu, +%llu -%llu, kept tiled %llu, unsafe evicted %llu, nodl %llu), buffers %llu MiB (%llu, +%llu -%llu); image GC trigger/pressure/critical %llu/%llu/%llu MiB, buffer GC trigger/critical %llu/%llu MiB\n",
+		LOGF("Video memory: %s; collections %llu; images %llu MiB (%llu, +%llu -%llu, kept tiled %llu, unsafe evicted %llu, nodl %llu, demoted %llu MiB (%llu), swapped out %llu MiB (%llu, back %llu, stale %llu; held %llu MiB)), buffers %llu MiB (%llu, +%llu -%llu); image GC trigger/pressure/critical %llu/%llu/%llu MiB, buffer GC trigger/critical %llu/%llu MiB\n",
 		     m_graphics.VideoMemoryLine().c_str(),
 		     static_cast<unsigned long long>(m_collections - std::exchange(last_collections, m_collections)),
 		     static_cast<unsigned long long>(m_accounted_bytes >> 20u),
@@ -4291,6 +4493,10 @@ void TextureCache::RunGarbageCollector() {
 		     static_cast<unsigned long long>(m_gc_deletions - std::exchange(last_deletions, m_gc_deletions)),
 		     static_cast<unsigned long long>(m_gc_skipped_tiled), static_cast<unsigned long long>(m_gc_skipped_unsafe),
 		     static_cast<unsigned long long>(m_gc_skipped_download),
+		     static_cast<unsigned long long>(m_gc_demoted_bytes >> 20u), static_cast<unsigned long long>(m_gc_demotions),
+		     static_cast<unsigned long long>(m_gc_swapout_bytes >> 20u), static_cast<unsigned long long>(m_gc_swapouts),
+		     static_cast<unsigned long long>(m_gc_restores), static_cast<unsigned long long>(m_gc_swap_stale),
+		     static_cast<unsigned long long>(m_swapped_bytes >> 20u),
 		     static_cast<unsigned long long>(m_buffer_cache.AccountedBytes() >> 20u),
 		     static_cast<unsigned long long>(m_buffer_cache.AccountedBuffers()),
 		     static_cast<unsigned long long>(m_buffer_cache.Registrations() - std::exchange(last_buffer_registrations, m_buffer_cache.Registrations())),
@@ -4353,6 +4559,7 @@ void TextureCache::RunGarbageCollector() {
 			// candidate list of every pass, and the collector freed nothing at the card's limit.
 			std::vector<ImageId> candidates;
 			candidates.reserve(deletions * 4);
+			uint64_t             demoted_bytes = 0;
 			// Deleting depth recursively deletes its stencil association, so finish LRU traversal
 			// first.
 			// (Textures that came back are the working set: below the critical level they stay until idle 600 frames.)
@@ -4379,6 +4586,18 @@ void TextureCache::RunGarbageCollector() {
 					// tiled ones cannot have it, untiled ones only under pressure.
 					const bool safe = SafeToDownload(*owner);
 					if (safe && owner->info.IsTiled()) {
+						// No download for a tiled image: under pressure its pixels go to system memory instead
+						// (SwapOutImage; DemoteImage on request), at most 64 MiB a flip, else it stays.
+						if (pressured && demoted_bytes < (uint64_t {64} << 20u)) {
+							const auto bytes = owner->AccountedSize();
+							if ((SwapEnabled() && SwapOutImage(id)) ||
+							    (DemoteEnabled() && !owner->host_memory && DemoteImage(id))) { // (owner may dangle after)
+								demoted_bytes += bytes;
+								--deletions;
+								++m_gc_deletions;
+								continue;
+							}
+						}
 						++m_gc_skipped_tiled;
 						m_lru_cache.Touch(owner->lru_id, tick);
 						continue;
@@ -4417,6 +4636,9 @@ void TextureCache::RunGarbageCollector() {
 				}
 			}
 		};
+		// Under pressure, the freed images kept for reuse (the image pool, up to 1/16 of the budget) go first: they
+		// are video memory nothing uses.
+		if (m_total_used_memory >= pressure_level) m_graphics.TrimImagePool();
 		collect(false);
 		if (m_total_used_memory >= critical_level) {
 			collect(true);

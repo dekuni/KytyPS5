@@ -589,6 +589,10 @@ inline void Run(uint64_t id, const std::string& line) {
 		const bool ok    = LocalPlatform::WriteHeapHistogram(arg1);
 		std::printf("LIVE_HEAPSTATS id=%" PRIu64 " path=%s written=%d ms=%.0f\n", id, arg1, ok ? 1 : 0,
 		            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count());
+	} else if (cmd == "mem" && n >= 2) {
+		// mem <path>: the process's address space by kind (LocalPlatform::WriteAddressSpaceCensus): what the RAM holds.
+		const bool ok = LocalPlatform::WriteAddressSpaceCensus(arg1);
+		std::printf("LIVE_MEM id=%" PRIu64 " path=%s written=%d\n", id, arg1, ok ? 1 : 0);
 	} else if (cmd == "alloctrace" && n >= 2) {
 		// alloctrace start <sizes,...> | dump <path>: live heap blocks of those sizes by stack (LocalPlatform::StartAllocTrace).
 		const bool start = std::string_view(arg1) == "start";
@@ -617,6 +621,26 @@ inline void Run(uint64_t id, const std::string& line) {
 		                     : n == 3 && Loader::DemonsSoulsWarp::Arm(arg1, arg2);
 		std::printf("LIVE_WARP id=%" PRIu64 " map=%s spawn=%s ok=%d spawns=%zu\n", id, arg1, n == 3 ? arg2 : "-",
 		            ok ? 1 : 0, Loader::DemonsSoulsWarp::Spawns().size());
+	} else if (cmd == "pos") {
+		// pos: the player's position and yaw now (none: no player).
+		float xyz[3] {}, yaw = 0;
+		if (Loader::DemonsSoulsWarp::PlayerPosition(xyz, &yaw))
+			std::printf("LIVE_POS id=%" PRIu64 " x=%.2f y=%.2f z=%.2f yaw=%.3f\n", id, xyz[0], xyz[1], xyz[2], yaw);
+		else
+			std::printf("LIVE_POS id=%" PRIu64 " none\n", id);
+	} else if (cmd == "spawns" && n >= 2) {
+		// spawns <path>: every map's spawn points ("map name x y z yaw" lines): routes for glide tours are made from them.
+		FILE* f = std::fopen(arg1, "w");
+		size_t count = 0;
+		if (f != nullptr) {
+			for (const auto& spawn: Loader::DemonsSoulsWarp::Spawns()) {
+				std::fprintf(f, "%s %s %.2f %.2f %.2f %.1f\n", spawn.map.c_str(), spawn.name.c_str(), spawn.x, spawn.y, spawn.z,
+				             spawn.yaw);
+				count++;
+			}
+			std::fclose(f);
+		}
+		std::printf("LIVE_SPAWNS id=%" PRIu64 " path=%s count=%zu\n", id, arg1, count);
 	} else if (cmd == "glide") {
 		// glide X Y Z SPEED: the player walked there in a straight line (loader/demonsSoulsWarp.h), at once; seconds = the
 		// time it takes (-1: no player).

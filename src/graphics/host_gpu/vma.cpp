@@ -88,6 +88,14 @@ bool GraphicContext::CreateAllocator() {
 		info.pHeapSizeLimit = heap_limits.data();
 	}
 
+	// KYTY_VMA_BLOCK_MB=<n> (default 64; VMA's own default 256): the memory blocks the allocator carves allocations
+	// from. A block is given back to the driver only once empty: with 256 MiB blocks a boss fight held 8.95 GB of
+	// blocks for 7.3 GB of images and buffers (10-15, a 12 GB card at its budget, the driver paging); smaller blocks
+	// empty sooner and the holes freed images leave cost less.
+	uint64_t block_mb = 64;
+	if (const char* text = std::getenv("KYTY_VMA_BLOCK_MB"); text != nullptr && std::strtoull(text, nullptr, 10) > 0)
+		block_mb = std::strtoull(text, nullptr, 10);
+	info.preferredLargeHeapBlockSize = block_mb << 20u;
 	const auto result = static_cast<vk::Result>(vmaCreateAllocator(&info, &allocator));
 	if (result != vk::Result::eSuccess) {
 		LOGF("vmaCreateAllocator failed: %s\n", vk::to_string(result).c_str());
@@ -136,7 +144,23 @@ bool GraphicContext::CreateAllocator() {
 		physical_device.getProperties2(&device_properties);
 		if (id.deviceLUIDValid) (void)LocalPlatform::OpenVideoMemoryAdapter(id.deviceLUID.data());
 	}
-	small_video_memory = GetTotalMemoryBudget() < (uint64_t {12} << 30u);
+	// A GPU that cannot hold the game's working set (Boletaria uses ~11 GB): its largest device-local heap under 12 GiB.
+	// By the heap's size, not the budget the OS reports (10-15: a 12 GB RTX 3080 Ti's budget read 11.1 GB, so its
+	// textures past half of it went to the driver's memory type without flags, which NVIDIA still placed in video
+	// memory; at 10.4 of 11.1 GB the driver paged and the GPU stalled 360 ms every few seconds of a new game).
+	// KYTY_SMALL_VIDEO_MEMORY=1/0: as if small / not, for an A/B.
+	uint64_t largest_heap = 0;
+	for (uint32_t i = 0; i < physical_device_memory_properties.memoryHeapCount; i++) {
+		if (physical_device_memory_properties.memoryHeaps[i].flags & vk::MemoryHeapFlagBits::eDeviceLocal)
+			largest_heap = std::max<uint64_t>(largest_heap, physical_device_memory_properties.memoryHeaps[i].size);
+	}
+	// (A 12 GB card's heap reads a little under 12 GiB: an RTX 3080 Ti's 12,084 MiB. Under 11.5 GiB is small.)
+	small_video_memory = largest_heap < (uint64_t {11} << 30u) + (uint64_t {512} << 20u);
+	if (const char* value = std::getenv("KYTY_SMALL_VIDEO_MEMORY"); value != nullptr && *value != '\0')
+		small_video_memory = *value != '0';
+	std::printf("Video memory: largest device-local heap %llu MiB, budget %llu MiB: %s\n",
+	            static_cast<unsigned long long>(largest_heap >> 20u), static_cast<unsigned long long>(GetTotalMemoryBudget() >> 20u),
+	            small_video_memory ? "treated as small (textures may leave video memory past half the budget)" : "not small");
 	LogVideoMemory("start");
 	g_report_allocator          = allocator;
 	g_report_context            = this;
@@ -410,11 +434,11 @@ std::string GraphicContext::VideoMemoryLine() const {
 	                   host_count, pool_bytes >> 20u, pool_count);
 }
 
-bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanImage& image) {
+bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanImage& image, bool host_memory) {
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(allocator == nullptr || image.image != nullptr || image.allocation != nullptr);
 
-	if (kyty_local_image_pool_mode.load(std::memory_order_relaxed) != 0 && image_info.pNext == nullptr &&
+	if (!host_memory && kyty_local_image_pool_mode.load(std::memory_order_relaxed) != 0 && image_info.pNext == nullptr &&
 	    image_info.tiling == vk::ImageTiling::eOptimal &&
 	    image_info.initialLayout == vk::ImageLayout::eUndefined) {
 		const auto key = ImagePoolKey(image_info);
@@ -455,6 +479,23 @@ bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanIm
 		alloc_info.requiredFlags = 0;
 		alloc_info.usage         = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
 	}
+	// Demoted by the texture collector: system memory for real (host-visible), not the flagless type NVIDIA places in
+	// video memory while there is room.
+	if (host_memory) {
+		// Only the memory types in system memory: host-visible and not device-local (with resizable BAR, NVIDIA has a
+		// host-visible device-local type in video memory, which a flags request alone could pick).
+		uint32_t types = 0;
+		for (uint32_t i = 0; i < physical_device_memory_properties.memoryTypeCount; i++) {
+			const auto flags = physical_device_memory_properties.memoryTypes[i].propertyFlags;
+			if ((flags & vk::MemoryPropertyFlagBits::eHostVisible) && !(flags & vk::MemoryPropertyFlagBits::eDeviceLocal))
+				types |= 1u << i;
+		}
+		if (types == 0) return false;
+		alloc_info.requiredFlags  = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+		alloc_info.preferredFlags = 0;
+		alloc_info.memoryTypeBits = types;
+		alloc_info.usage          = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+	}
 	const auto create = [&] {
 		vk::Image::CType native_image = VK_NULL_HANDLE;
 		const auto       result       = static_cast<vk::Result>(
@@ -464,7 +505,8 @@ bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanIm
 		return result == vk::Result::eSuccess;
 	};
 	// Out of video memory: without the freed images kept for reuse, then in system memory (slower
-	// to sample, but the game goes on).
+	// to sample, but the game goes on). (A demoted image's system memory failing: false, it stays as it was.)
+	if (host_memory && !create()) return false;
 	if (!create()) {
 		TrimImagePool();
 		if (!create()) {
@@ -489,6 +531,11 @@ bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanIm
 	image.flags      = image_info.flags;
 	image.state      = {.layout = image_info.initialLayout};
 	image.subresource_states.clear();
+	{
+		VkMemoryPropertyFlags properties = 0;
+		vmaGetAllocationMemoryProperties(allocator, image.allocation, &properties);
+		image.host_memory = (properties & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) == 0 && (properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0;
+	}
 
 	return true;
 }
