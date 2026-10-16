@@ -285,7 +285,9 @@ void Serialize(Archive& ar, IR::DescriptorSource& v, ValueTable& table) {
 		v.indirect_image.reset();
 		return;
 	}
-	if (!ar.Writing()) v.indirect_image.emplace();
+	// (Assigned, not emplace(): libstdc++ with clang takes IndirectImage, a nested struct with default member
+	// initializers, for not default-constructible, as std::optional's member is declared before they are complete.)
+	if (!ar.Writing()) v.indirect_image = IR::DescriptorSource::IndirectImage {};
 	Serialize(ar, *v.indirect_image);
 }
 
