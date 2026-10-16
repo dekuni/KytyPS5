@@ -20,6 +20,7 @@ const QList<Choice>& quality();
 const QList<Choice>& antiAliasing();
 const QList<Choice>& frameGeneration();
 const QList<Choice>& render();
+const QList<Choice>& ratio();
 const QList<Choice>& screen();
 const QList<Choice>& fps();
 const QList<Choice>& overlay();

@@ -50,6 +50,9 @@ bool     g_camera_only = false; // the camera alone (FSR 4 upscaling)
 Camera   g_camera;              // Kyty.Gpu: the current guest frame
 Sources  g_sources;             // Kyty.Gpu: the current guest frame
 uint64_t g_guest_frame = 0;     // Kyty.Gpu
+std::atomic<bool> g_scene {false}; // the current guest frame ran the TAA pass
+std::atomic<bool> g_last_scene {false}; // ... the last one the guest flipped
+std::atomic<uint64_t> g_flips_taken {0}; // TakeScene calls (guest flips)
 
 float AsFloat(uint32_t word) {
 	float value = 0.0f;
@@ -822,6 +825,25 @@ void OnDraw(uint64_t vs_hash, std::span<const uint32_t> srt) {
 bool WantsDraw(uint64_t vs_hash) {
 	return !g_camera.valid &&
 	       std::find(GbufferVertexShaders.begin(), GbufferVertexShaders.end(), vs_hash) != GbufferVertexShaders.end();
+}
+
+void NoteScene() {
+	g_scene.store(true, std::memory_order_relaxed);
+}
+
+bool TakeScene() {
+	const bool scene = g_scene.exchange(false, std::memory_order_relaxed);
+	g_last_scene.store(scene, std::memory_order_relaxed);
+	g_flips_taken.fetch_add(1, std::memory_order_relaxed);
+	return scene;
+}
+
+uint64_t GuestFlips() {
+	return g_flips_taken.load(std::memory_order_relaxed);
+}
+
+bool SceneNoted() {
+	return g_scene.load(std::memory_order_relaxed) || g_last_scene.load(std::memory_order_relaxed);
 }
 
 void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId motion,

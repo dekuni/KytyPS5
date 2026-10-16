@@ -30,6 +30,7 @@ QString Value(const LauncherSettings& s, const QString& key) {
 	if (key == QStringLiteral("aa")) return s.aa;
 	if (key == QStringLiteral("framegen")) return s.framegen;
 	if (key == QStringLiteral("render")) return QString::number(s.render);
+	if (key == QStringLiteral("ratio")) return s.ratio;
 	if (key == QStringLiteral("screen")) return s.screen;
 	if (key == QStringLiteral("fps")) return QString::number(s.fps);
 	if (key == QStringLiteral("language")) return QString::number(s.language);
@@ -48,6 +49,7 @@ const QList<Choice>* ChoicesOf(const QString& key) {
 	if (key == QStringLiteral("aa")) return &Choices::antiAliasing();
 	if (key == QStringLiteral("framegen")) return &Choices::frameGeneration();
 	if (key == QStringLiteral("render")) return &Choices::render();
+	if (key == QStringLiteral("ratio")) return &Choices::ratio();
 	if (key == QStringLiteral("screen")) return &Choices::screen();
 	if (key == QStringLiteral("fps")) return &Choices::fps();
 	if (key == QStringLiteral("hud")) return &Choices::overlay();
@@ -177,14 +179,32 @@ SettingsPage::SettingsPage(SettingsStore* store, bool hybridCpu, QWidget* parent
 	addRow(graphics, QStringLiteral("aa"), tr("Anti-aliasing"), combo(Choices::antiAliasing()));
 	addRow(graphics, QStringLiteral("framegen"), tr("Frame generation"), combo(Choices::frameGeneration()));
 	addRow(graphics, QStringLiteral("render"), tr("3D resolution"), combo(Choices::render()));
+	addRow(graphics, QStringLiteral("ratio"), tr("Aspect ratio"), combo(Choices::ratio()));
 	QWidget* system   = section(tr("SYSTEM"));
 	auto*    language = new DarkCombo;
 	for (int i = 0; i < Choices::languages().size(); i++) language->addItem(Choices::languages().at(i), QString::number(i));
 	language->setFixedWidth(250);
 	language->setMaxVisibleItems(12);
 	addRow(system, QStringLiteral("language"), tr("Language"), language);
-	addRow(system, QStringLiteral("redzone"), tr("Memory protection"), new ToggleSwitch);
-	if (hybridCpu) addRow(system, QStringLiteral("ecores"), tr("Precompile on E-cores"), new ToggleSwitch);
+	// Advanced: what most players never need to touch, folded away (open when one of them is not at its default).
+	auto* advanced_toggle = makeButton(tr("Show advanced settings"), "text", content);
+	content_layout->addWidget(advanced_toggle, 0, Qt::AlignLeft);
+	auto* advanced_label = SectionLabel(tr("ADVANCED"), content);
+	content_layout->addWidget(advanced_label);
+	auto* advanced        = makeCard(content);
+	auto* advanced_layout = new QVBoxLayout(advanced);
+	advanced_layout->setContentsMargins(6, 6, 6, 6);
+	advanced_layout->setSpacing(0);
+	content_layout->addWidget(advanced);
+	addRow(advanced, QStringLiteral("redzone"), tr("Memory protection"), new ToggleSwitch);
+	if (hybridCpu) addRow(advanced, QStringLiteral("ecores"), tr("Precompile on E-cores"), new ToggleSwitch);
+	auto show_advanced = [advanced_toggle, advanced_label, advanced, this](bool show) {
+		advanced_label->setVisible(show);
+		advanced->setVisible(show);
+		advanced_toggle->setText(show ? tr("Hide advanced settings") : tr("Show advanced settings"));
+	};
+	connect(advanced_toggle, &QPushButton::clicked, this, [advanced, show_advanced] { show_advanced(advanced->isHidden()); });
+	show_advanced(!m_store->settings().redzone || m_store->settings().ecores);
 	content_layout->addStretch(1);
 
 	// The description panel.
@@ -240,6 +260,7 @@ void SettingsPage::reload() {
 void SettingsPage::updateEnabled() {
 	const LauncherSettings& s = m_store->settings();
 	if (auto* row = m_rows.value(QStringLiteral("render"))) row->setRowEnabled(s.output == QStringLiteral("4k"));
+	if (auto* row = m_rows.value(QStringLiteral("ratio"))) row->setRowEnabled(s.output == QStringLiteral("4k"));
 	if (auto* row = m_rows.value(QStringLiteral("aspect"))) row->setRowEnabled(s.screen == QStringLiteral("fullscreen"));
 }
 
@@ -254,6 +275,7 @@ void SettingsPage::commit(const QString& key) {
 		else if (key == QStringLiteral("aa")) s.aa = value;
 		else if (key == QStringLiteral("framegen")) s.framegen = value;
 		else if (key == QStringLiteral("render")) s.render = value.toInt();
+		else if (key == QStringLiteral("ratio")) s.ratio = value;
 		else if (key == QStringLiteral("screen")) s.screen = value;
 		else if (key == QStringLiteral("fps")) s.fps = value.toInt();
 		else if (key == QStringLiteral("language")) s.language = value.toInt();
@@ -293,6 +315,8 @@ void SettingsPage::describe(SettingsRow* row, int highlighted) {
 	else if (key == QStringLiteral("render")) {
 		name = tr("3D resolution");
 		text = Choices::renderDescription();
+	} else if (key == QStringLiteral("ratio")) {
+		name = tr("Aspect ratio");
 	} else if (key == QStringLiteral("screen")) {
 		name = tr("Display mode");
 		text = Choices::screenDescription();

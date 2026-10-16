@@ -16,6 +16,7 @@ struct LauncherSettings {
 	bool    vsync     = false;
 	bool    hdr       = false;
 	int     render    = 1440;                       // 3D height with the 4K output: 1440 | 1296 | 1152 | 1080 | 900
+	QString ratio     = QStringLiteral("16:9");     // 3D aspect ratio with the 4K output: 16:9 | 21:9 | 32:9
 	int     language  = 1;                          // 0-29, the PS5's console languages
 	bool    redzone   = true;
 	bool    ecores    = false;

@@ -34,10 +34,11 @@ QString text(const Package& package) {
 	             .arg(s.output, s.quality, s.aa, s.framegen, s.screen, s.aspect ? QStringLiteral("true") : QStringLiteral("false"))
 	             .arg(s.fps)
 	             .arg(s.vsync ? QStringLiteral("true") : QStringLiteral("false"), s.hdr ? QStringLiteral("true") : QStringLiteral("false"));
-	lines << QStringLiteral("#   render=%1 language=%2 redzone=%3 ecores=%4")
+	lines << QStringLiteral("#   render=%1 ratio=%5 language=%2 redzone=%3 ecores=%4")
 	             .arg(s.render)
 	             .arg(s.language)
-	             .arg(s.redzone ? QStringLiteral("true") : QStringLiteral("false"), s.ecores ? QStringLiteral("true") : QStringLiteral("false"));
+	             .arg(s.redzone ? QStringLiteral("true") : QStringLiteral("false"), s.ecores ? QStringLiteral("true") : QStringLiteral("false"))
+	             .arg(s.ratio);
 	if (!inputs.config.ok()) {
 		lines << QStringLiteral("# cannot launch: %1").arg(inputs.config.error);
 		return lines.join('\n') + '\n';
@@ -85,11 +86,13 @@ QString text(const Package& package) {
 	lines << QStringLiteral("start: %1").arg(plan.commandLine());
 
 	lines << QString();
-	lines << QStringLiteral("# The precompile (precompile-windows.ps1%1):").arg(s.ecores && Platform::efficiencyMask() != 0
-	                                                                               ? QStringLiteral(" -Affinity 0x%1: Precompile on E-cores").arg(QString::number(Platform::efficiencyMask(), 16).toUpper())
-	                                                                               : QString());
-	const PrecompileSetup setup = PrecompileSetup::make(package, inputs.game, inputs.config, s.ecores ? Platform::efficiencyMask() : 0,
-	                                                    Platform::logicalCpuCount());
+	const quint64 precompile_mask = PrecompileSetup::cpuMask(s.ecores, Platform::logicalCpuCount());
+	lines << QStringLiteral("# The precompile (precompile-windows.ps1%1):")
+	             .arg(precompile_mask == 0 ? QString()
+	                                       : QStringLiteral(" -Affinity 0x%1: %2")
+	                                             .arg(QString::number(precompile_mask, 16).toUpper(),
+	                                                  s.ecores ? QStringLiteral("Precompile on E-cores") : QStringLiteral("the performance cores")));
+	const PrecompileSetup setup = PrecompileSetup::make(package, inputs.game, inputs.config, precompile_mask, Platform::logicalCpuCount());
 	lines << setup.describe();
 	return lines.join('\n') + '\n';
 }

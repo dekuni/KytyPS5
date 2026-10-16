@@ -13,7 +13,7 @@ class QProcess;
 
 // "Report a problem": a zip on the Desktop (KytyPS5-report-<date>.zip) with the newest logs (the last 5 runs, and the
 // last precompile's own logs), launcher-settings.json, system.txt (this PC, the game, the shaders, the optional files)
-// and launch.txt (the last play command and switches).
+// and launch.txt (the last play command and switches), the user name left out of their folder paths.
 class ProblemReport final: public QObject {
 	Q_OBJECT
 
@@ -27,6 +27,9 @@ public:
 
 	// system.txt for this PC, game and shader state.
 	static QString systemText(const Package& package, const GameInfo& game, const QString& shaderState);
+	// `text` with this PC's user name left out of folder paths (C:\Users\<user>, /home/<user>, also as JSON writes
+	// them): a report goes into a public issue. Every file of the zip goes through it.
+	static QString withoutUserName(const QString& text);
 
 signals:
 	void finished(bool ok, const QString& zipPath, const QString& error);

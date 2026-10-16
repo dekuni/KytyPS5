@@ -311,7 +311,7 @@ void HomePage::setGame(const GameInfo& game, bool hasGame, bool async) {
 		return;
 	}
 	m_title->setText(game.titleName.isEmpty() ? tr("Demon's Souls") : game.titleName);
-	const QString state = game.tested()        ? QStringLiteral("<span style='color:#5CB85C'>%1</span>").arg(tr("Tested"))
+	const QString state = game.tested()        ? QStringLiteral("<span style='color:#5CB85C'>%1</span>").arg(game.supportedOnly() ? tr("Supported") : tr("Tested"))
 	                      : game.otherRegion() ? QStringLiteral("<span style='color:#E0A030'>%1</span>").arg(tr("Untested region"))
 	                                           : QStringLiteral("<span style='color:#E0A030'>%1</span>").arg(tr("Untested version"));
 	m_line->setText(game.paramRead ? QStringLiteral("%1 · %2 · %3").arg(game.titleId, game.displayVersion(), state)

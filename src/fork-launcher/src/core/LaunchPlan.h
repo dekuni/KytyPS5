@@ -5,7 +5,7 @@
 //
 // The launcher's settings map to run-windows.ps1's parameters as the PowerShell launcher passed them
 // (launcher.ps1 Get-PlayCommand): -Language, -Output, -Fullscreen [-AspectFit] or -Width/-Height, -Quality,
-// -Upscaler, -FsrFrameGen, -Fps120, -PresentMode Fifo (VSync), -Hdr, -RenderHeight (4K output), -NoRedZone; the
+// -Upscaler, -FsrFrameGen, -Fps120, -PresentMode Fifo (VSync), -Hdr, -RenderHeight and -Aspect (4K output), -NoRedZone; the
 // launcher's own: DLSS (KYTY_DLSS) and the performance overlay (KYTY_FPS_HUD). Not ported: -Baseline, -NoAot and the SRT
 // AOT library (a config's KYTY_SRT_AOT_LIBRARY is dropped, as with -NoAot), -Prompt (the launcher's own dialogs),
 // -DryRun (the launcher's --dry-run), -Set, -Patch, -Affinity, -FrameGen, -StreamlineDir, -Precompile.

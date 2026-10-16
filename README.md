@@ -2,11 +2,11 @@
 
 A Windows build of the KytyPS5 PlayStation 5 emulator, tuned for one game: **Demon's Souls (PS5, PPSA01341)**.
 
-It is a fork of [chenxiao07's Demon's Souls branch of KytyPS5](https://github.com/chenxiao07/KytyPS5).
-**Nearly all of the work that makes Demon's Souls run well in this emulator is chen's**: the table path
-(GPU-driven draws), native XPR, the shader precompile, the graphics presets, the DualSense support and much
-more. This fork builds on his commit `d782ef25` (2026-10-15) and adds further speed-ups, fixes, display options
-and its own launcher, listed [below](#what-this-fork-adds). If you enjoy playing with it, thank chen first.
+[chenxiao07's Demon's Souls branch of KytyPS5](https://github.com/chenxiao07/KytyPS5) is the foundation of this
+fork: the table path (GPU-driven draws), native XPR, the shader precompile, the graphics presets, the DualSense
+support and much more are his work. This fork builds on his commit `30d2d2cb` and adds **10-22%
+more speed** ([measured](#performance) against chen's own build), its own launcher, 1080p
+output modes, more graphics options and fixes, listed [below](#what-this-fork-adds).
 
 chen's branch is based on [KytyPS5](https://github.com/KytyPS5/KytyPS5), which is itself based on
 [Kyty](https://github.com/InoriRus/Kyty) by InoriRus.
@@ -16,7 +16,7 @@ chen's branch is based on [KytyPS5](https://github.com/KytyPS5/KytyPS5), which i
 
 ## Download and play
 
-1. Download the zip from **[the latest release](https://github.com/exploitz/KytyPS5/releases/latest)**.
+1. Download the zip from **[the Releases page](https://github.com/exploitz/KytyPS5/releases)**.
 2. Unzip it into a folder of its own with about 20 GB free, for example `C:\Games\KytyPS5` (not Program Files,
    Downloads, Temp or OneDrive: the shader caches, logs and saves are kept inside it).
 3. Double-click **KytyPS5 Launcher.exe**. Windows may say it protected your PC (the programs are not signed):
@@ -33,7 +33,7 @@ first launch, performance tips and troubleshooting.
 
 | Game | Title ID | Versions |
 | --- | --- | --- |
-| Demon's Souls | PPSA01341 | 1.07 (01.007.000): tested with this fork. 1.05 (01.005.000): supported by chen's branch; this fork's additions were tested on 1.07 only. |
+| Demon's Souls | PPSA01341 | 1.07 (01.007.000): tested with this fork. 1.05 (01.005.000): supported by chen's branch; this fork's additions were tested on 1.07 only (the lighting rule matches 1.07's shaders and does not apply to 1.05; the 1080p modes are untested there). Update to 1.07 if you can. |
 | Demon's Souls (US) | PPSA01342 | Same game patches and settings; untested. |
 
 The launcher reads the game's version and warns when it is not one of these.
@@ -46,14 +46,14 @@ The launcher reads the game's version and warns when it is not one of these.
 | Processor (CPU) | With AVX2: Intel Core 4th generation, AMD Ryzen, or newer | Single-thread speed matters most (the emulator's render thread runs on one core). More threads make the shader precompile faster. |
 | Graphics card (GPU) | Vulkan 1.3, **12 GB of video memory** | 8 GB works, with lower frame rates in heavy areas. Tested on NVIDIA RTX; **AMD and Intel GPUs are untested**. |
 | Memory (RAM) | **32 GB** | 16 GB works, with slower loading. The emulator commits about 34 GB of RAM plus page file: leave the page file on "System managed size". |
-| Disk space | About 20 GB free, NTFS | Static precompile about 7 GB (one file: not FAT32/exFAT), translation store about 5 GB, driver cache about 1 GB. An SSD is recommended. |
+| Disk space | About 20 GB free, NTFS | Static precompile about 5.5 GB (one file: not FAT32/exFAT), translation store about 5 GB, driver cache about 1 GB. An SSD is recommended. |
 
 ## What this fork adds
 
 Everything below sits on top of chen's work, which remains the foundation.
 
 1. **Faster GPU shaders.** The shader translator drops redundant per-lane masking work (EXEC-mask selects) that
-   most of the game's shaders carried.
+   most of the game's shaders carried: the largest single gain, +6-7% at Boletaria 1-1 and the Tower of Latria.
 2. **Translation store.** Translated shaders are kept on disk between launches, so later launches load them
    instead of translating about 20,000 shaders again: loading takes about a minute.
 3. **Faster lighting.** A Demon's Souls-specific rule for four tile-lighting and fog compute shaders: the
@@ -62,8 +62,10 @@ Everything below sits on top of chen's work, which remains the foundation.
    textures that come back soon after being dropped, and sets its levels from your card's video memory budget:
    about 4-5% faster than chen's collector in our Stonefang test.
 5. **A launcher.** First-run setup with a PC check and recommended settings, every setting explained, the shader
-   precompile and the game start with their progress inside the launcher, and a one-click problem report. It is
-   a Qt application, ready for Linux.
+   precompile and the game start with their progress inside the launcher, and a one-click problem report. On
+   Intel processors with efficiency cores it runs the precompile on the performance cores, about 2.5 times as fast
+   (154 to 61 minutes on the test PC).
+   It is a Qt application, ready for Linux.
 6. **1080p output modes with the HUD at its normal size.** Small patches to the game's code, applied at start
    and located by the game's original bytes: "1080p Quality" renders the 1440p scene and scales it down,
    "1080p Performance" renders at 1080p.
@@ -73,39 +75,43 @@ Everything below sits on top of chen's work, which remains the foundation.
 8. **FSR 4 anti-aliasing (experimental).** Replaces the game's TAA at the same resolution: cleaner edges, about
    13% slower. Built from an older community-hosted FSR 4 "v07" source; **not AMD's official FSR 4**.
 9. **FSR 3.1 frame generation** (AMD FidelityFX, any GPU), with the HUD kept out of generated frames.
-10. **Fixes.** A crash in the ATRAC9 audio decoder at the Shrine of Storms; 7.1 sound folded down to stereo
+10. **A faster memory allocator** (mimalloc) behind the emulator's own allocations: +1.4-2.5%.
+11. **Fixes.** A crash in the ATRAC9 audio decoder at the Shrine of Storms; 7.1 sound folded down to stereo
     when your output is not 7.1, and the game's ambisonic sound objects decoded into the 7.1 mix; the game's
     file reads on its own threads (a movie froze with the background reader); a translation store that grew at
     every launch.
 
-**DLSS is not included.** NVIDIA's SDK license is not compatible with shipping it inside a GPL program; it may
-come later as a separate, optional add-on. **Trophies** are not recorded yet.
+**DLSS is not included.** NVIDIA's SDK license is not compatible with shipping it inside a GPL program. Using
+DLSS through NVIDIA's own Streamline download, which you would add yourself, is planned for a later release.
+**Trophies** are not recorded yet.
 
 <!-- screenshot: Standard vs Fewer shadows, same spot (Tower of Latria) -->
 
 ## Performance
 
-chen's own build of his commit `d782ef25` against this release's exe, which is built on the same commit.
+chen's own build of his commit `6bae2db5` against this fork's exe built on the same commit. (The release adds his
+next two commits, `4254fb56` and `30d2d2cb`, which open the game's files ahead while it loads: they change loading,
+not the frame rate.)
 
 - Settings: PS5 Performance mode (1440p scene, 4K output), frame rate uncapped for measuring.
 - Test PC: Intel Core i9-12900K, NVIDIA GeForce RTX 3080 Ti, 64 GB RAM, Windows 11.
 - Builds: chen's with his PGO profile for this CPU (`-march=native`); this fork's release exe (`-march=x86-64-v3`,
   any AVX2 CPU) with the same profile.
-- Method: a warm-up lap of each build, then alternating rounds (chen, this fork, this fork, chen). Each figure
-  averages the two rounds of that build (2026-10-15).
+- Method: both builds' shader caches warm first, then rounds in mirrored order (chen's build first and last).
+  Each figure averages the two rounds of that build (2026-10-15).
 
 | Area | chen's build | This fork | Change |
 | --- | ---: | ---: | ---: |
-| Boletaria 1-1, standing | 43.4 | 49.8 | +15% |
-| Boletaria 1-2, standing | 46.7 | 55.3 | +18% |
-| Tower of Latria, standing | 46.7 | 52.0 | +11% |
-| Shrine of Storms beach, standing | 51.1 | 57.6 | +13% |
-| Nexus, standing | 58.9 | 67.8 | +15% |
-| Stonefang 2-1, camera turning | 67.5 | 76.0 | +13% |
-| Shrine of Storms beach, camera turning | 64.7 | 71.8 | +11% |
-| Boletaria 1-1, camera turning | 57.0 | 66.5 | +17% |
-| Boletaria 1-2, camera turning | 63.2 | 72.3 | +14% |
-| Nexus, camera turning | 53.1 | 61.2 | +15% |
+| Boletaria 1-1, standing | 42.5 | 48.2 | +13% |
+| Boletaria 1-2, standing | 43.6 | 53.0 | +22% |
+| Tower of Latria, standing | 45.6 | 50.3 | +10% |
+| Shrine of Storms beach, standing | 48.1 | 56.0 | +16% |
+| Nexus, standing | 56.5 | 66.4 | +17% |
+| Stonefang 2-1, camera turning | 65.6 | 73.9 | +13% |
+| Shrine of Storms beach, camera turning | 61.9 | 69.3 | +12% |
+| Boletaria 1-1, camera turning | 56.3 | 64.3 | +14% |
+| Boletaria 1-2, camera turning | 60.7 | 69.5 | +15% |
+| Nexus, camera turning | 52.2 | 58.7 | +12% |
 
 - The 1% lows (the slowest frames) are better in every area.
 - At the normal 60 fps limit most areas hold 60 fps while moving on this PC; the heaviest views, such as
@@ -119,12 +125,13 @@ Results vary by PC: the CPU's single-thread speed matters most, then the graphic
 | --- | --- | --- |
 | Output | 4K (PS5) / 1080p Quality / 1080p Performance | The picture the game makes: 4K as on PS5, or 1080p with the HUD at its normal size. |
 | 3D resolution | 1440p (PS5) down to 900p | With the 4K output: a smaller 3D scene for weaker graphics cards. |
+| Aspect ratio | 16:9 (PS5) / 21:9 / 32:9 | With the 4K output: the 3D rendered wider for ultrawide screens (chen's). |
 | Graphics detail | Standard (PS5) / Fewer shadows / Low / Lowest | Less to draw for slower CPUs; Fewer shadows keeps the scenery. |
 | Anti-aliasing | Game TAA / FSR 4 (experimental) | FSR 4: cleaner edges, about 13% slower. |
 | Frame generation | Off / FSR 3.1 | Smoother motion, a little more input lag. |
 | Display mode | Fullscreen / window sizes | F11 or Alt+Enter switches in game. |
 | Keep 16:9 | On / Off | Black bars on ultrawide and 16:10 screens. |
-| Frame rate limit | 60 (PS5) / 120 | 120: above 60 where your PC can; movies play faster. |
+| Frame rate limit | 60 (PS5) / 120 | 120: above 60 where your PC can; movies and menus stay at 60. |
 | VSync | Off / On | On: no tearing; G-SYNC/FreeSync keep adapting. |
 | HDR | Off / On | Needs Windows HDR on for the display. |
 | Performance overlay | Off / Frame rate / Detailed | The emulator's own frame rate and frame-time panel. |
@@ -135,8 +142,9 @@ Results vary by PC: the CPU's single-thread speed matters most, then the graphic
 This release is tested on one PC. Reports from other hardware help most, AMD and Intel graphics cards, AMD
 processors, laptops and Windows 10 above all. If something goes wrong, click **Report a problem** in the
 launcher: it saves a zip with the logs and a summary of your PC to your Desktop and opens a
-[new issue](https://github.com/exploitz/KytyPS5/issues/new/choose); attach the zip. Please report problems with
-this fork here, not to chen or to the KytyPS5 project.
+[new issue](https://github.com/exploitz/KytyPS5/issues/new/choose); attach the zip. The zip leaves your Windows
+user name out of folder paths (`C:\Users\<user>`). Please report problems with this fork here, not to chen or to the
+KytyPS5 project.
 
 ## Building from source
 

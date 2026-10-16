@@ -43,9 +43,23 @@ constexpr qint64 kFinishMs = 90 * 1000;
 } // namespace
 
 int Precompile::estimateMinutes(int cpus) {
-	// 10-15, this release on a Core i9-12900K (24 threads, 8 of them E-cores), RTX 3080 Ti: 98,938 pipelines planned,
-	// 154 min (chen's PC: about 40 min). The time left once it runs comes from its progress.
-	return static_cast<int>(std::ceil(154.0 * 24.0 / std::max(1, cpus) / 10.0)) * 10;
+	// 10-15, the release package in a new folder on a Core i9-12900K (its 16 P-core threads), RTX 3080 Ti: 98,982
+	// pipelines, 61 min, the shaders of recorded play ready after 32 (chen's PC: about 40 min). A rough guide by thread
+	// count; the time left once it runs comes from its progress.
+	return static_cast<int>(std::ceil(61.0 * 16.0 / std::max(1, cpus) / 10.0)) * 10;
+}
+
+quint64 PrecompileSetup::cpuMask(bool ecores, int processorCount) {
+	const quint64 efficiency = Platform::efficiencyMask();
+	if (efficiency == 0) return 0;
+	if (ecores) return efficiency;
+	// 10-15, i9-12900K (P-core threads 0-15, E-cores 16-23), the same 24 shards each way: 18.4 pipelines/s on the P-cores
+	// (5 at a time; 17.5 with 8 x 2 threads) against 8.0 on all 24 threads (8 x 3; 8.8 with 6). With E-cores in the mask
+	// the compilers that land there hold the run up: the full precompile took 154 min, 61 on the P-cores.
+	const int     n   = std::max(1, processorCount);
+	const quint64 all = n >= 64 ? ~quint64(0) : (quint64(1) << n) - 1;
+	const quint64 performance = all & ~efficiency;
+	return performance != 0 ? performance : 0;
 }
 
 PrecompileSetup PrecompileSetup::make(const Package& package, const GameInfo& game, const LaunchConfig& config, quint64 affinity,
@@ -72,10 +86,20 @@ PrecompileSetup PrecompileSetup::make(const Package& package, const GameInfo& ga
 	s.programStamp = Caches::programStamp(package.tool);
 	s.remakeSeeds  = QFileInfo::exists(s.seeds) && Caches::readProgramStamp(s.seeds) != s.programStamp;
 	s.makeSeeds    = !QFileInfo::exists(s.seeds) || s.remakeSeeds;
-	// The specializations of recorded play: this PC's recording, else the release's hints completed with the seed file.
+	// The specializations of recorded play, all of it (precompile-windows.ps1 since chen's dc3bca16): the release's hints
+	// completed with the seed file's code, this PC's warmup recordings and a recorded seed file next to the seed file.
+	// One of them alone left the others out (a laptop's recorded seed file kept the hints of a pipeline its play then met).
 	const QDir seeds_dir = QFileInfo(s.seeds).absoluteDir();
 	s.recorded           = seeds_dir.filePath(QStringLiteral("recorded-%1.seeds").arg(s.cacheId));
-	s.hints              = package.path(QStringLiteral("tools/local/static-precompile/hints-%1.hints").arg(s.cacheId));
+	s.released           = seeds_dir.filePath(QStringLiteral("released-%1.seeds").arg(s.cacheId));
+	s.together           = seeds_dir.filePath(QStringLiteral("recorded-play-%1.hints").arg(s.cacheId));
+	s.hinted             = seeds_dir.filePath(QStringLiteral("hinted-%1.seeds").arg(s.cacheId));
+	const QDir warmup(package.path(QStringLiteral("_PipelineCache/warmup-v2")));
+	for (const QString& dir: warmup.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+		const QString file = warmup.filePath(dir + QStringLiteral("/%1.shaders").arg(s.cacheId));
+		if (QFileInfo::exists(file)) s.recordings << file;
+	}
+	s.hints = package.path(QStringLiteral("tools/local/static-precompile/hints-%1.hints").arg(s.cacheId));
 	// Another region's Demon's Souls of the same version shares its shaders: its hints (PPSA01341's first).
 	static const QRegularExpression demons_souls(QStringLiteral("^PPSA0134[0-2]$"));
 	if (!QFileInfo::exists(s.hints) && demons_souls.match(game.titleId).hasMatch()) {
@@ -86,10 +110,7 @@ PrecompileSetup PrecompileSetup::make(const Package& package, const GameInfo& ga
 		});
 		if (!region.isEmpty()) s.hints = hints_dir.filePath(region.first());
 	}
-	if (!QFileInfo::exists(s.recorded) && QFileInfo::exists(s.hints)) {
-		s.applyHints = true;
-		s.hinted     = seeds_dir.filePath(QStringLiteral("hinted-%1.seeds").arg(s.cacheId));
-	}
+	s.hasHints = QFileInfo::exists(s.hints);
 	// The CPUs: -Affinity, else the launch config's list, else all.
 	quint64 mask = affinity;
 	if (mask == 0) {
@@ -139,21 +160,38 @@ QStringList PrecompileSetup::describe() const {
 		                  command({QStringLiteral("--make-seeds"), Native(remakeSeeds ? seeds + QStringLiteral(".new") : seeds),
 		                        QStringLiteral("--states"), Native(passStates)}));
 	}
-	const QString recorded_file = applyHints ? hinted : recorded;
-	if (applyHints) {
-		lines << QStringLiteral("  hints: %1").arg(command({QStringLiteral("--seeds"), Native(seeds), QStringLiteral("--apply-hints"),
-		                                                 Native(hints), QStringLiteral("--out"), Native(hinted)}));
+	// Recorded play: the release's hints alone, else everything gathered (the release's hints applied, the recordings, the
+	// recorded seed file).
+	QStringList sources;
+	if (hasHints) {
+		lines << QStringLiteral("  released: %1").arg(command({QStringLiteral("--seeds"), Native(seeds), QStringLiteral("--apply-hints"),
+		                                                    Native(hints), QStringLiteral("--out"), Native(released)}));
+		sources << released;
+	}
+	sources << recordings;
+	if (QFileInfo::exists(recorded)) sources << recorded;
+	QString recorded_file;
+	if (sources.size() == 1 && hasHints) {
+		recorded_file = released;
+	} else if (!sources.isEmpty()) {
+		QStringList gather {QStringLiteral("--seeds"), Native(seeds), QStringLiteral("--make-hints"), Native(together)};
+		for (const QString& source: sources) gather << QStringLiteral("--recorded") << Native(source);
+		lines << QStringLiteral("  gather: %1").arg(command(gather));
+		lines << QStringLiteral("  apply: %1").arg(command({QStringLiteral("--seeds"), Native(seeds), QStringLiteral("--apply-hints"),
+		                                                 Native(together), QStringLiteral("--out"), Native(hinted)}));
+		recorded_file = hinted;
 	}
 	lines << QStringLiteral("  merge-before: %1").arg(command({QStringLiteral("--merge")}));
-	const bool has_recorded = applyHints || QFileInfo::exists(recorded);
+	const bool has_recorded = !recorded_file.isEmpty();
 	if (has_recorded) {
 		lines << QStringLiteral("  plan-recorded: %1")
 		             .arg(command({QStringLiteral("--seeds"), Native(recorded_file), QStringLiteral("--dry-run"), QStringLiteral("--plan"),
 		                        Native(plan), QStringLiteral("--threads"), QString::number(cpus)}));
 	}
-	lines << QStringLiteral("  plan-seeds: %1   (also the shader prefetch inputs)")
-	             .arg(command({QStringLiteral("--seeds"), Native(seeds), QStringLiteral("--dry-run"), QStringLiteral("--plan"), Native(plan),
-	                        QStringLiteral("--threads"), QString::number(cpus), QStringLiteral("--static-inputs")}));
+	QStringList plan_seeds {QStringLiteral("--seeds"), Native(seeds), QStringLiteral("--dry-run"), QStringLiteral("--plan"), Native(plan),
+	                        QStringLiteral("--threads"), QString::number(cpus), QStringLiteral("--static-inputs")};
+	if (has_recorded) plan_seeds << QStringLiteral("--covered-by") << Native(recorded_file);
+	lines << QStringLiteral("  plan-seeds: %1   (also the shader prefetch inputs)").arg(command(plan_seeds));
 	lines << QStringLiteral("  shards (with KYTY_PRECOMPILE_CLAIMS=%1\\claims):").arg(Native(nvidiaCaches));
 	if (has_recorded) {
 		const qint64  pipelines = QFileInfo::exists(recorded_file) ? Caches::seedPipelines(recorded_file) : -1;
@@ -209,7 +247,31 @@ void Precompile::start(const PrecompileSetup& setup) {
 	}
 	QDir().mkpath(setup.logs);
 	emit output(setup.describe().value(0));
-	runStep(setup.makeSeeds ? Step::Seeds : setup.applyHints ? Step::Hints : Step::MergeBefore);
+	if (setup.makeSeeds) runStep(Step::Seeds);
+	else beginRecorded();
+}
+
+// Recorded play's specializations: the release's hints applied first (when there are any), then everything gathered.
+void Precompile::beginRecorded() {
+	m_sources.clear();
+	m_recorded.clear();
+	if (m_setup.hasHints) runStep(Step::Released);
+	else gatherRecorded();
+}
+
+void Precompile::gatherRecorded() {
+	QStringList sources = m_sources;
+	sources << m_setup.recordings;
+	if (QFileInfo::exists(m_setup.recorded)) sources << m_setup.recorded;
+	if (sources.size() == 1 && sources.first() == m_setup.released) {
+		m_recorded = m_setup.released;
+		runStep(Step::MergeBefore);
+	} else if (!sources.isEmpty()) {
+		m_sources = sources;
+		runStep(Step::Gather);
+	} else {
+		runStep(Step::MergeBefore);
+	}
 }
 
 QProcess* Precompile::makeTool(const QString& name, const QStringList& arguments, bool claims, bool allCpus) {
@@ -246,10 +308,22 @@ void Precompile::runStep(Step step) {
 			arguments = {QStringLiteral("--make-seeds"), Native(m_setup.remakeSeeds ? m_setup.seeds + QStringLiteral(".new") : m_setup.seeds),
 			             QStringLiteral("--states"), Native(m_setup.passStates)};
 			break;
-		case Step::Hints:
+		case Step::Released:
 			update(PrecompileProgress::Stage::Preparing, tr("Getting ready"));
-			name      = QStringLiteral("hints");
+			name      = QStringLiteral("released");
 			arguments = {QStringLiteral("--seeds"), Native(m_setup.seeds), QStringLiteral("--apply-hints"), Native(m_setup.hints),
+			             QStringLiteral("--out"), Native(m_setup.released)};
+			break;
+		case Step::Gather:
+			update(PrecompileProgress::Stage::Preparing, tr("Getting ready"));
+			name      = QStringLiteral("gather");
+			arguments = {QStringLiteral("--seeds"), Native(m_setup.seeds), QStringLiteral("--make-hints"), Native(m_setup.together)};
+			for (const QString& source: m_sources) arguments << QStringLiteral("--recorded") << Native(source);
+			break;
+		case Step::Apply:
+			update(PrecompileProgress::Stage::Preparing, tr("Getting ready"));
+			name      = QStringLiteral("apply");
+			arguments = {QStringLiteral("--seeds"), Native(m_setup.seeds), QStringLiteral("--apply-hints"), Native(m_setup.together),
 			             QStringLiteral("--out"), Native(m_setup.hinted)};
 			break;
 		case Step::MergeBefore:
@@ -266,9 +340,11 @@ void Precompile::runStep(Step step) {
 		case Step::PlanSeeds:
 			update(PrecompileProgress::Stage::Planning, tr("Planning the work"));
 			name      = QStringLiteral("plan-seeds");
-			// (With the compiled inputs: the game's shader prefetch has them from the start.)
+			// (With the compiled inputs: the game's shader prefetch has them from the start.) The seeds' guessed specializations
+			// of shaders recorded play has are left out (chen's dc3bca16: two 1-1 walks met 1 of 2,227 such pipelines).
 			arguments = {QStringLiteral("--seeds"), Native(m_setup.seeds), QStringLiteral("--dry-run"), QStringLiteral("--plan"),
 			             Native(m_setup.plan), QStringLiteral("--threads"), QString::number(m_setup.cpus), QStringLiteral("--static-inputs")};
+			if (m_has_recorded) arguments << QStringLiteral("--covered-by") << Native(m_recorded);
 			break;
 		case Step::MergeRecorded:
 			// Without the claims: a merge copying the store would claim every pipeline in it.
@@ -284,7 +360,8 @@ void Precompile::runStep(Step step) {
 		case Step::Shards: scheduleShards(); return;
 	}
 	// (The seed and hint steps run as the script's own commands: on all CPUs.)
-	QProcess* process = makeTool(name, arguments, claims, step == Step::Seeds || step == Step::Hints);
+	QProcess* process = makeTool(name, arguments, claims,
+	                             step == Step::Seeds || step == Step::Released || step == Step::Gather || step == Step::Apply);
 	m_jobs.insert(name, process);
 	connect(process, &QProcess::finished, this, [this, step, name, process](int code, QProcess::ExitStatus status) {
 		m_jobs.remove(name);
@@ -321,11 +398,27 @@ void Precompile::afterStep(Step step, int code, const QString& name) {
 				QFile::rename(made, m_setup.seeds);
 			}
 			Caches::writeProgramStamp(m_setup.seeds, m_setup.programStamp);
-			runStep(m_setup.applyHints ? Step::Hints : Step::MergeBefore);
+			beginRecorded();
 			return;
 		}
-		case Step::Hints:
-			if (code != 0) emit output(QStringLiteral("the specialization hints could not be applied (kyty_shader_precompile --apply-hints): the seeds alone"));
+		case Step::Released:
+			if (code == 0 && QFileInfo::exists(m_setup.released)) m_sources << m_setup.released;
+			else emit output(QStringLiteral("the release's specialization hints could not be applied (kyty_shader_precompile --apply-hints)"));
+			gatherRecorded();
+			return;
+		case Step::Gather:
+			if (code == 0) {
+				runStep(Step::Apply);
+				return;
+			}
+			emit output(QStringLiteral("the specializations of recorded play could not be gathered (kyty_shader_precompile --make-hints): "
+			                           "the seeds alone"));
+			runStep(Step::MergeBefore);
+			return;
+		case Step::Apply:
+			if (code == 0 && QFileInfo::exists(m_setup.hinted)) m_recorded = m_setup.hinted;
+			else emit output(QStringLiteral("the specializations of recorded play could not be applied (kyty_shader_precompile --apply-hints): "
+			                                "the seeds alone"));
 			runStep(Step::MergeBefore);
 			return;
 		case Step::MergeBefore:
@@ -333,9 +426,7 @@ void Precompile::afterStep(Step step, int code, const QString& name) {
 				fail(tr("Merging the last run's shards failed; logs: %1").arg(log_name));
 				return;
 			}
-			m_recorded     = m_setup.applyHints ? m_setup.hinted : m_setup.recorded;
 			m_has_recorded = !m_recorded.isEmpty() && QFileInfo::exists(m_recorded);
-			if (m_setup.applyHints && !QFileInfo::exists(m_setup.hinted)) m_has_recorded = false;
 			runStep(m_has_recorded ? Step::PlanRecorded : Step::PlanSeeds);
 			return;
 		case Step::PlanRecorded:

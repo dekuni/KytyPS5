@@ -24,6 +24,7 @@ const QStringList kFramegen  = {QStringLiteral("off"), QStringLiteral("fsr")};
 const QStringList kScreens   = {QStringLiteral("fullscreen"), QStringLiteral("1280x720"), QStringLiteral("1920x1080"),
                                 QStringLiteral("2560x1440"), QStringLiteral("3840x2160")};
 const QList<int>  kRenders   = {1440, 1296, 1152, 1080, 900};
+const QStringList kRatios    = {QStringLiteral("16:9"), QStringLiteral("21:9"), QStringLiteral("32:9")};
 
 // The JSON a PowerShell ConvertTo-Json or a hand edit makes: numbers and booleans may come as strings.
 bool ToBool(const QJsonValue& value, bool fallback) {
@@ -65,7 +66,7 @@ SettingsStore::SettingsStore(QString path, bool readOnly): m_path(std::move(path
 bool SettingsStore::valid(const LauncherSettings& s) {
 	return kOutputs.contains(s.output) && kQualities.contains(s.quality) && kAa.contains(s.aa) &&
 	       kFramegen.contains(s.framegen) && kScreens.contains(s.screen) && (s.fps == 60 || s.fps == 120) &&
-	       kRenders.contains(s.render) && s.language >= 0 && s.language <= 29 && s.hud >= 0 && s.hud <= 2;
+	       kRenders.contains(s.render) && kRatios.contains(s.ratio) && s.language >= 0 && s.language <= 29 && s.hud >= 0 && s.hud <= 2;
 }
 
 void SettingsStore::load() {
@@ -104,6 +105,7 @@ void SettingsStore::load() {
 			s.hdr                  = ToBool(json.value(QStringLiteral("hdr")), s.hdr);
 			const int render       = ToInt(json.value(QStringLiteral("render")), s.render);
 			s.render               = kRenders.contains(render) ? render : 1440;
+			s.ratio                = ToChoice(json.value(QStringLiteral("ratio")), kRatios, s.ratio);
 			const int language     = ToInt(json.value(QStringLiteral("language")), s.language);
 			s.language             = language >= 0 && language <= 29 ? language : 1;
 			s.redzone              = ToBool(json.value(QStringLiteral("redzone")), s.redzone);
@@ -141,6 +143,7 @@ bool SettingsStore::save() {
 	      << QStringLiteral("  \"screen\": %1").arg(JsonString(s.screen)) << QStringLiteral("  \"aspect\": %1").arg(b(s.aspect))
 	      << QStringLiteral("  \"fps\": %1").arg(s.fps) << QStringLiteral("  \"vsync\": %1").arg(b(s.vsync))
 	      << QStringLiteral("  \"hdr\": %1").arg(b(s.hdr)) << QStringLiteral("  \"render\": %1").arg(s.render)
+	      << QStringLiteral("  \"ratio\": %1").arg(JsonString(s.ratio))
 	      << QStringLiteral("  \"language\": %1").arg(s.language) << QStringLiteral("  \"redzone\": %1").arg(b(s.redzone))
 	      << QStringLiteral("  \"ecores\": %1").arg(b(s.ecores)) << QStringLiteral("  \"hud\": %1").arg(s.hud)
 	      << QStringLiteral("  \"windowX\": %1").arg(s.windowX) << QStringLiteral("  \"windowY\": %1").arg(s.windowY)

@@ -11,6 +11,7 @@
 #include <QGuiApplication>
 #include <QMap>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QScreen>
 #include <QStandardPaths>
 
@@ -18,7 +19,7 @@
 
 namespace {
 
-// A log copied whole, or its last 16 MB (a long session's output).
+// A log copied whole, or its last 16 MB (a long session's output), without the user name (withoutUserName).
 bool CopyTail(const QString& from, const QString& to) {
 	constexpr qint64 limit = 16 * 1024 * 1024;
 	QFile            in(from);
@@ -29,13 +30,25 @@ bool CopyTail(const QString& from, const QString& to) {
 		in.seek(in.size() - limit);
 		out.write("[... the beginning of this log is left out ...]\n");
 	}
-	while (!in.atEnd()) out.write(in.read(1024 * 1024));
+	out.write(ProblemReport::withoutUserName(QString::fromUtf8(in.readAll())).toUtf8());
 	return true;
 }
 
 } // namespace
 
 ProblemReport::ProblemReport(QObject* parent): QObject(parent) {}
+
+QString ProblemReport::withoutUserName(const QString& text) {
+	const QString user = QFileInfo(QDir::homePath()).fileName();
+	if (user.isEmpty()) return text;
+	// \Users\<name>, /Users/<name>, \\Users\\<name> (JSON) or /home/<name>; the name ends at a separator, a quote,
+	// a space or the end.
+	const QRegularExpression paths(QStringLiteral(R"(((?:\\{1,2}|/)(?:Users|home)(?:\\{1,2}|/))%1(?=[\\/"'\s]|$))")
+	                                   .arg(QRegularExpression::escape(user)),
+	                               QRegularExpression::CaseInsensitiveOption);
+	QString result = text;
+	return result.replace(paths, QStringLiteral("\\1<user>"));
+}
 
 ProblemReport::~ProblemReport() {
 	if (m_process != nullptr) {
@@ -82,7 +95,7 @@ QString ProblemReport::systemText(const Package& package, const GameInfo& game, 
 	}
 	lines << QString();
 	lines << QStringLiteral("Game:         %1").arg(QDir::toNativeSeparators(game.path));
-	lines << QStringLiteral("Game id:      %1%2").arg(game.versionKey(), game.tested() ? QStringLiteral(" (tested)") : QStringLiteral(" (untested)"));
+	lines << QStringLiteral("Game id:      %1%2").arg(game.versionKey(), !game.tested() ? QStringLiteral(" (untested)") : game.supportedOnly() ? QStringLiteral(" (supported)") : QStringLiteral(" (tested)"));
 	lines << QStringLiteral("Title:        %1").arg(game.titleName);
 	lines << QStringLiteral("Precompile:   %1").arg(shaderState);
 	lines << QString();
@@ -127,14 +140,16 @@ void ProblemReport::create(const Package& package, const QString& system, const 
 	auto        write = [&](const QString& name, const QString& text) {
         QFile file(staging.filePath(name));
         if (file.open(QIODevice::WriteOnly)) {
-            file.write(text.toUtf8());
+            file.write(withoutUserName(text).toUtf8());
             files << name;
         }
 	};
 	write(QStringLiteral("system.txt"), system);
 	if (!launch.isEmpty()) write(QStringLiteral("launch.txt"), launch);
 	if (!launcherLog.isEmpty()) write(QStringLiteral("launcher-log.txt"), launcherLog);
-	if (QFile::copy(package.settingsFile, staging.filePath(QStringLiteral("launcher-settings.json")))) files << QStringLiteral("launcher-settings.json");
+	if (QFile settings(package.settingsFile); settings.open(QIODevice::ReadOnly)) {
+		write(QStringLiteral("launcher-settings.json"), QString::fromUtf8(settings.readAll()));
+	}
 	// The newest play runs: <stamp>.out.log and <stamp>.err.log, at most five.
 	const QDir logs(package.logDir);
 	QMap<QString, QStringList> runs; // stamp -> files

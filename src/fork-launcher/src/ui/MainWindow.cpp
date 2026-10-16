@@ -409,7 +409,7 @@ bool MainWindow::preflight() {
 		}
 	} else if (!m_game.tested()) {
 		if (MessageDialog::ask(this, Tone::Warn, tr("This game version is untested"),
-		                       tr("%1 may not start or may crash; versions 1.07 and 1.05 are tested.").arg(m_game.versionKey()),
+		                       tr("%1 may not start or may crash; version 1.07 is tested, 1.05 supported.").arg(m_game.versionKey()),
 		                       {tr("Cancel"), tr("Play anyway")}) != 1) {
 			return false;
 		}
@@ -552,7 +552,7 @@ void MainWindow::startPrecompile() {
 		return;
 	}
 	const LauncherSettings& s     = m_store.settings();
-	const quint64           mask  = s.ecores ? m_efficiency_mask : 0;
+	const quint64           mask  = PrecompileSetup::cpuMask(s.ecores, Platform::logicalCpuCount());
 	const PrecompileSetup   setup = PrecompileSetup::make(m_package, m_game, m_config, mask, Platform::logicalCpuCount());
 	if (!setup.ok()) {
 		MessageDialog::tell(this, Tone::Danger, tr("The precompile can't start"), setup.error);

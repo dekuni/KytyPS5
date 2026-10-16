@@ -110,14 +110,14 @@ QList<CheckItem> systemChecks(const SystemInfo& info) {
 		else
 			items.append({S::Warn, line, QStringLiteral("The shader caches take 15-20 GB in this folder. Free some space or move the folder to a bigger drive.")});
 	}
-	// The file system: the shader cache is one file of about 11 GB.
+	// The file system: the shader cache is one file of about 5.5 GB (FAT32: 4 GB at most).
 	if (!info.fileSystem.isEmpty()) {
 		const QString fs   = info.fileSystem.toUpper();
 		const QString line = QStringLiteral("File system: %1").arg(info.fileSystem);
 		if (fs.contains(QStringLiteral("FAT32")) || fs == QStringLiteral("VFAT") || fs == QStringLiteral("FAT")) {
-			items.append({S::Warn, line, QStringLiteral("FAT32 can't hold the shader cache, a single file of about 11 GB. Move the folder to an NTFS drive.")});
+			items.append({S::Warn, line, QStringLiteral("FAT32 can't hold the shader cache, a single file of about 5.5 GB. Move the folder to an NTFS drive.")});
 		} else if (fs.contains(QStringLiteral("EXFAT"))) {
-			items.append({S::Warn, line, QStringLiteral("exFAT is slow and easily damaged with the 11 GB shader cache file. An NTFS drive is better.")});
+			items.append({S::Warn, line, QStringLiteral("exFAT is slow and easily damaged with the 5.5 GB shader cache file. An NTFS drive is better.")});
 		} else {
 			items.append({S::Ok, line, {}});
 		}

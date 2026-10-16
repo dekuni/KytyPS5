@@ -24,6 +24,9 @@ struct GameInfo {
 	// "v1.07"
 	[[nodiscard]] QString displayVersion() const;
 	[[nodiscard]] bool    tested() const;
+	// A tested version this fork did not test itself: 1.05, which chen's branch supports (its precompile hints ship);
+	// this fork's additions were tested on 1.07. Shown as "Supported" instead of "Tested".
+	[[nodiscard]] bool    supportedOnly() const;
 	// Another region's Demon's Souls (PPSA01340, PPSA01342) in a tested version: likely to run, not tested.
 	[[nodiscard]] bool    otherRegion() const;
 

@@ -56,6 +56,10 @@ bool GameInfo::tested() const {
 	return testedVersions().contains(versionKey(), Qt::CaseInsensitive);
 }
 
+bool GameInfo::supportedOnly() const {
+	return tested() && versionKey().compare(testedVersions().first(), Qt::CaseInsensitive) != 0;
+}
+
 bool GameInfo::otherRegion() const {
 	static const QRegularExpression demons_souls(QStringLiteral("^PPSA0134[02]$"), QRegularExpression::CaseInsensitiveOption);
 	return paramRead && demons_souls.match(titleId).hasMatch() &&

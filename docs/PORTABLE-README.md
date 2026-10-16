@@ -5,10 +5,10 @@ This is a Windows build of the KytyPS5 PlayStation 5 emulator, tuned for one gam
 under Releases.
 
 It is a fork of chenxiao07's Demon's Souls branch of KytyPS5 (https://github.com/chenxiao07/KytyPS5).
-Nearly all of the work that makes Demon's Souls run well in this emulator is chen's: the table path
-(GPU-driven draws), native XPR, the shader precompile and the graphics presets. This fork adds further
-speed-ups, fixes, display options and its own launcher on top. The repository's front page lists them,
-with performance measurements.
+chen's branch is the foundation of this fork: the table path (GPU-driven draws), native XPR, the shader
+precompile, the graphics presets and much more are his work. This fork adds 10-22% more speed, its own
+launcher, 1080p output modes, more graphics options and fixes. The repository's front page lists them, with
+performance measurements.
 
 You need a dump of your own copy of the game. This package contains no game files.
 
@@ -37,7 +37,9 @@ After that, start the launcher and click Play. It remembers your settings.
 
 - Game: Demon's Souls, title ID PPSA01341 (content ID EP9000-PPSA01341_00-DEMONSSOULS00000).
 - Version 1.07 (01.007.000): tested with this fork.
-- Version 1.05 (01.005.000): supported by chen's branch; this fork's additions were tested on 1.07 only.
+- Version 1.05 (01.005.000): supported by chen's branch; this fork's additions were tested on 1.07 only. The
+  faster lighting rule matches 1.07's shaders and does not apply to 1.05, and the 1080p modes are untested there.
+  Update to 1.07 if you can.
 - The US release (PPSA01342) gets the same game patches and settings; it is untested.
 
 Each version keeps shader caches of its own, so the precompile is done once per version. The launcher
@@ -61,9 +63,9 @@ These are recommendations. Much slower PCs may not run the game or may stutter b
   the game's memory to the page file.
 - Page file: Windows must be able to give the emulator about 34 GB of RAM plus page file. Keep the page
   file on "System managed size" (see Troubleshooting); the launcher warns when it is too small.
-- Disk: about 20 GB free for the shader caches (static precompile about 7 GB, translation store about
+- Disk: about 20 GB free for the shader caches (static precompile about 5.5 GB, translation store about
   5 GB, driver cache about 1 GB), on top of the game dump. An NTFS drive (not FAT32 or exFAT: the
-  precompiled shaders are one ~7 GB file), an SSD recommended.
+  precompiled shaders are one ~5.5 GB file), an SSD recommended.
 
 
 ## The launcher
@@ -108,6 +110,12 @@ game's original bytes; they keep the HUD at its normal size. They are made for v
 Draws the 3D scene smaller inside the 4K picture ("1440p (PS5)" down to "900p"); the HUD stays sharp.
 For weaker graphics cards on a 1440p or 4K screen.
 
+### Aspect ratio (4K output only)
+
+"21:9" and "32:9" (chen's) render the 3D wider for ultrawide screens: you see more to the sides instead of
+a stretched picture. The HUD keeps its shape at the sides of the screen; menus are stretched and movies stay
+16:9. "16:9 (PS5)" is the game's own shape.
+
 ### Graphics detail
 
 How much the game draws. Each object drawn costs the emulator processor time, so these presets help most
@@ -136,7 +144,8 @@ when your CPU limits the frame rate.
   says why.
 
 DLSS is not part of this release: NVIDIA's SDK license is not compatible with shipping it inside a GPL
-program. It may come later as a separate, optional add-on.
+program. Using DLSS through NVIDIA's own Streamline download, which you would add yourself, is planned for a
+later release.
 
 ### Frame generation
 
@@ -158,8 +167,8 @@ In fullscreen on a screen that is not 16:9 (ultrawide, 16:10): black bars instea
 ### Frame rate limit
 
 - "60 (PS5)" (default): the game's own limit.
-- "120": lets the game run above 60 where your PC is fast enough. The game keeps its normal speed, but
-  the pre-rendered movies play faster.
+- "120": lets the game run above 60 where your PC is fast enough. The game keeps its normal speed;
+  movies, menus and loading screens stay at 60.
 
 ### VSync
 
@@ -168,8 +177,8 @@ G-SYNC or FreeSync display the refresh rate keeps adapting to the game.
 
 ### HDR
 
-HDR10 output for an HDR display. Turn on "Use HDR" for that display in Windows first (Settings > System
-> Display); without it the picture stays SDR.
+HDR10 output for an HDR display. Turn on "Use HDR" for that display in Windows first
+(Settings > System > Display); without it the picture stays SDR.
 
 ### Performance overlay
 
@@ -183,15 +192,15 @@ in use.
 
 The console language the game sees: its text and voices follow it where the game has them.
 
-### Memory protection
+### Advanced
 
-Keep on. It protects the game's memory from a Windows behaviour that otherwise corrupts it at random
-(crashes, odd behaviour).
+"Show advanced settings" at the bottom of Settings opens two settings that are best left as they are:
 
-### Precompile on E-cores
-
-On an Intel processor with efficiency cores: the shader precompile runs on those only, so the PC stays
-responsive. It takes longer.
+- Memory protection: keep on. It protects the game's memory from a Windows behaviour that otherwise
+  corrupts it at random (crashes, odd behaviour).
+- Precompile on E-cores (Intel processors with efficiency cores): the shader precompile runs on the
+  efficiency cores only, so the PC stays responsive, but it takes much longer. By default it runs on the
+  performance cores, where it is fastest (on the test PC about twice as fast as on all cores).
 
 
 ## First launch
@@ -219,18 +228,21 @@ remembered and does not stutter again.
 The emulator keeps three kinds of shader work, all inside `_PipelineCache`:
 
 1. Translation store (automatic, added by this fork): translated shaders are kept on disk between
-   launches. The first launch translates about 20,000 shaders (a few minutes); later launches load them.
-   About 5 GB.
+   launches. The first launch translates about 20,000 shaders (a few minutes; the top right corner shows
+   "Preparing shaders"); later launches load them ("Loading shaders from disk"). About 5 GB.
 2. Background shader preparation (automatic): after every launch, the game's shaders are prepared in the
    background while the top right corner shows the progress. The CPU is busy meanwhile.
 3. Full precompile (recommended once): compiles every shader of the game ahead of time. Afterwards,
    most shader stutter is gone; a few effects are still built in the background the first time they
-   appear (a short hitch, once). About 7 GB.
+   appear (a short hitch, once). About 5.5 GB.
    - Start it in the setup, or with "Precompile" on the Home page.
-   - It takes from under an hour to a few hours, depending on the CPU and the graphics driver: 2 h 34 min
-     on the test PC (Core i9-12900K, 24 threads), about 40 minutes on chen's PC. The launcher shows an
-     estimate for your PC and, once it runs, the time left. The CPU is fully loaded meanwhile, so run it when you do
-     not need the PC. You can play while it runs, but new scenes stutter until it is done.
+   - It takes from under an hour to a few hours, depending on the CPU and the graphics driver: 61 minutes
+     on the test PC (Core i9-12900K, on its 16 performance-core threads), about 40 minutes on chen's PC. The
+     launcher shows an estimate for your PC and, once it runs, the time left. The CPU is fully loaded
+     meanwhile, so run it when you do not need the PC.
+   - It compiles the shaders of recorded play first (the places played in testing; half an hour on the test
+     PC). From then on the launcher adds "ready to play": you can play while the rest compiles, those places
+     without stutter, others still stuttering until it is done.
    - Stop ends it; the next run continues where it stopped.
    - After a graphics driver update or a new graphics card it must be done again; the launcher says so.
    - Places and effects the test PC never recorded (bosses' deaths, for one) can still compile when they
@@ -316,6 +328,8 @@ New areas or effects stutter
 Black screen at start
 - On the first launch, shader preparation can take about a minute before the picture appears. "Show log"
   on Home shows the progress.
+- If Frame generation is on and the picture stays black for minutes while the game runs (its sound plays),
+  turn Frame generation off in Settings, start again, and report it with "Report a problem".
 
 "Windows protected your PC", or the antivirus removes the emulator
 - The programs are not signed, which some security software treats as suspicious. Click "More info",
@@ -327,7 +341,8 @@ Black screen at start
 Reporting a bug
 - Click "Report a problem" (Home or Help). It saves `KytyPS5-report-<date>.zip` to your Desktop, with the
   newest logs and a summary of your PC, and opens a new issue at
-  https://github.com/exploitz/KytyPS5/issues: attach the zip and say what happened and where.
+  https://github.com/exploitz/KytyPS5/issues: attach the zip and say what happened and where. The zip leaves
+  your Windows user name out of folder paths (`C:\Users\<user>`).
 - Please report problems with this fork there, not to chen or to the KytyPS5 project.
 
 
@@ -341,7 +356,8 @@ Everything stays inside this folder:
   the game and the precompile from the command line, for advanced use.
 - `_SaveData`: your saves, created by the first run. Back them up now and then.
 - `_PipelineCache`: the shader caches (precompile, translation store, driver cache; about 12 GB after a
-  full precompile). They are valid only for this PC's graphics card and driver: do not copy them to
+  full precompile), and in `files` the list of the game's files in the order it opens them (later launches
+  open them ahead, for faster loading). They are valid only for this PC's graphics card and driver: do not copy them to
   another PC. Deleting this folder does not touch your saves; the caches are made again, and the
   precompile has to be run again.
 - `logs`: the run logs.

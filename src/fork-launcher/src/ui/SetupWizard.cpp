@@ -216,7 +216,7 @@ QWidget* SetupWizard::makeGamePage() {
 	m_game_message->hide();
 	layout->addWidget(m_game_message);
 
-	auto* note = makeLabel(tr("Use only a dump of a game you own. Tested: PPSA01341 versions 1.07 and 1.05."), "secondary", page);
+	auto* note = makeLabel(tr("Use only a dump of a game you own. Tested: PPSA01341 version 1.07; 1.05 is supported."), "secondary", page);
 	note->setFont(Theme::font(9));
 	layout->addStretch(1);
 	layout->addWidget(note);
@@ -265,7 +265,7 @@ void SetupWizard::setGame(const QString& requested) {
 			m_game_icon->setPixmap(RoundedIcon(m_game.iconPath, 64, devicePixelRatioF()));
 			m_game_icon->setVisible(!m_game.iconPath.isEmpty());
 			m_game_title->setText(m_game.titleName.isEmpty() ? tr("Demon's Souls") : m_game.titleName);
-			const QString state = m_game.tested()        ? QStringLiteral("<span style='color:#5CB85C'>%1</span>").arg(tr("Tested"))
+			const QString state = m_game.tested()        ? QStringLiteral("<span style='color:#5CB85C'>%1</span>").arg(m_game.supportedOnly() ? tr("Supported") : tr("Tested"))
 			                      : m_game.otherRegion() ? QStringLiteral("<span style='color:#E0A030'>%1</span>").arg(tr("Untested region"))
 			                                             : QStringLiteral("<span style='color:#E0A030'>%1</span>").arg(tr("Untested version"));
 			m_game_line->setText(m_game.paramRead ? QStringLiteral("%1 · %2 · %3").arg(m_game.titleId, m_game.displayVersion(), state)
@@ -277,7 +277,7 @@ void SetupWizard::setGame(const QString& requested) {
 				message(Tone::Warn, tr("%1 is another region's release: it should run like the tested PPSA01341 %2, but it is untested.")
 				                        .arg(m_game.titleId, m_game.displayVersion()));
 			} else if (!m_game.tested()) {
-				message(Tone::Warn, tr("Version %1 is untested: it may not start or may crash. Versions 1.07 and 1.05 are tested.")
+				message(Tone::Warn, tr("Version %1 is untested: it may not start or may crash. Version 1.07 is tested, 1.05 supported.")
 				                        .arg(m_game.contentVersion));
 			}
 		}

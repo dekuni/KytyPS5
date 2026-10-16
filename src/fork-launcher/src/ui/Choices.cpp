@@ -65,6 +65,18 @@ const QList<Choice>& render() {
 	return choices;
 }
 
+const QList<Choice>& ratio() {
+	static const QList<Choice> choices = {
+	    {QStringLiteral("16:9"), QStringLiteral("16:9 (PS5)"), QStringLiteral("The game's own shape.")},
+	    {QStringLiteral("21:9"), QStringLiteral("21:9"),
+	     QStringLiteral("For ultrawide screens: the 3D rendered wider, seeing more to the sides. The HUD keeps its shape; menus "
+	                    "are stretched, movies stay 16:9. Only with 4K output.")},
+	    {QStringLiteral("32:9"), QStringLiteral("32:9"),
+	     QStringLiteral("For super-ultrawide screens, as 21:9 but wider still. Only with 4K output.")},
+	};
+	return choices;
+}
+
 const QList<Choice>& screen() {
 	static const QList<Choice> choices = {
 	    {QStringLiteral("fullscreen"), QStringLiteral("Fullscreen"), {}},
@@ -79,7 +91,9 @@ const QList<Choice>& screen() {
 const QList<Choice>& fps() {
 	static const QList<Choice> choices = {
 	    {QStringLiteral("60"), QStringLiteral("60 (PS5)"), QStringLiteral("The game's own limit.")},
-	    {QStringLiteral("120"), QStringLiteral("120"), QStringLiteral("Lets the game run above 60 where your PC can. The game keeps its speed; movies play faster.")},
+	    {QStringLiteral("120"), QStringLiteral("120"),
+	     QStringLiteral("Lets the game run above 60 where your PC can. The game keeps its speed; movies, menus and loading screens "
+	                    "stay at 60.")},
 	};
 	return choices;
 }
@@ -87,8 +101,8 @@ const QList<Choice>& fps() {
 const QList<Choice>& overlay() {
 	static const QList<Choice> choices = {
 	    {QStringLiteral("0"), QStringLiteral("Off"), QStringLiteral("No overlay.")},
-	    {QStringLiteral("1"), QStringLiteral("Frame rate"), QStringLiteral("The frame rate and frame time at the top right of the game.")},
-	    {QStringLiteral("2"), QStringLiteral("Detailed"), QStringLiteral("Adds a frame-time graph and GPU, CPU and memory use.")},
+	    {QStringLiteral("1"), QStringLiteral("Frame rate"), QStringLiteral("The frame rate and a frame-time graph at the top right of the game.")},
+	    {QStringLiteral("2"), QStringLiteral("Detailed"), QStringLiteral("Adds the render thread's time and GPU, CPU and memory use.")},
 	};
 	return choices;
 }
@@ -157,7 +171,8 @@ QString redzoneDescription() {
 }
 
 QString ecoresDescription() {
-	return QStringLiteral("Runs the precompile on efficiency cores only so the PC stays responsive. Takes longer.");
+	return QStringLiteral("Runs the precompile on the efficiency cores only, so the PC stays responsive. Much slower: by default it "
+	                      "runs on the performance cores, where it is fastest.");
 }
 
 QString summary(const LauncherSettings& s) {
@@ -166,6 +181,7 @@ QString summary(const LauncherSettings& s) {
 	if (s.quality == QStringLiteral("standard")) parts << QStringLiteral("Standard detail");
 	else if (s.quality == QStringLiteral("shadows")) parts << QStringLiteral("Fewer shadows");
 	else parts << label(quality(), s.quality) + QStringLiteral(" detail");
+	if (s.output == QStringLiteral("4k") && s.ratio != QStringLiteral("16:9")) parts << s.ratio;
 	parts << label(screen(), s.screen);
 	if (s.aa == QStringLiteral("fsr4")) parts << QStringLiteral("FSR 4");
 	else if (s.aa == QStringLiteral("dlss")) parts << QStringLiteral("DLSS");

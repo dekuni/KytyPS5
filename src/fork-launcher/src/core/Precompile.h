@@ -1,13 +1,14 @@
 #pragma once
 
-// The static shader and pipeline precompile as precompile-windows.ps1 runs it, in C++: the seed file, the recorded or
-// hinted specializations (another region's hints for a Demon's Souls without its own), the plan (its seeds' half also
-// writes the shader prefetch inputs: the m18 tree's script, no inputs step after a full run), the shards
+// The static shader and pipeline precompile as precompile-windows.ps1 runs it, in C++: the seed file, recorded play's
+// specializations (the release's hints, another region's for a Demon's Souls without its own, this PC's warmup
+// recordings and a recorded seed file, gathered into one hinted seed file), the plan (its seeds' half also writes the
+// shader prefetch inputs, and leaves out the guessed specializations of shaders recorded play has), the shards
 // (kyty_shader_precompile --shard i/n, Jobs at a time on the allowed CPUs, split in two on exit code 3) and the merges.
 // An interrupted run resumes: its finished
 // shards are merged first and what the static cache holds is not compiled again. Progress events for the window.
 //
-// Not ported: -Coverage, -Quick, -InputsOnly, -ExportHints, -NoPrune, -Jobs/-Threads/-Shards/-Seeds/-Recorded overrides
+// Not ported: -Coverage, -Quick, -Full, -InputsOnly, -ExportHints, -NoPrune, -Jobs/-Threads/-Shards/-Seeds/-Recorded overrides
 // (the script's defaults are used: 3 threads a process, 512 shards of the seed file).
 
 #include "core/GameInfo.h"
@@ -40,8 +41,12 @@ Q_DECLARE_METATYPE(PrecompileProgress)
 
 // What a precompile run is made of, computed before anything runs (also the dry run's listing).
 struct PrecompileSetup {
-	QString      root, tool, game, cacheId, seeds, recorded, hints, hinted, passStates, programStamp, logs, nvidiaCaches, plan;
-	bool         makeSeeds = false, remakeSeeds = false, applyHints = false;
+	QString      root, tool, game, cacheId, seeds, passStates, programStamp, logs, nvidiaCaches, plan;
+	// Recorded play: the release's hints (`hints`, `released` once completed with the seed file's code), this PC's warmup
+	// recordings, a recorded seed file next to the seed file (`recorded`); gathered into `together`, then `hinted`.
+	QString      hints, released, recorded, together, hinted;
+	QStringList  recordings;
+	bool         makeSeeds = false, remakeSeeds = false, hasHints = false;
 	quint64      mask = 0, all = 0;
 	int          cpus = 0, jobs = 1, threads = 3, shards = 512;
 	QStringList  translationSwitches; // KEY=VALUE copied from the launch config
@@ -54,6 +59,9 @@ struct PrecompileSetup {
 	// `affinity`: 0 = the launch config's CPUs, else all (precompile-windows.ps1 -Affinity).
 	static PrecompileSetup make(const Package& package, const GameInfo& game, const LaunchConfig& config, quint64 affinity,
 	                            int processorCount);
+	// The CPUs a precompile runs on (make's `affinity`): on a hybrid CPU its performance cores, or its efficiency cores
+	// alone with `ecores` (the setting "Precompile on E-cores"); 0 elsewhere (the launch config's list, else all).
+	static quint64 cpuMask(bool ecores, int processorCount);
 };
 
 class Precompile final: public QObject {
@@ -83,12 +91,14 @@ private:
 		QString seedFile;
 		QString shard; // "i/n" (empty: not a shard)
 	};
-	enum class Step { Seeds, Hints, MergeBefore, PlanRecorded, PlanSeeds, Shards, MergeRecorded, Merge };
+	enum class Step { Seeds, Released, Gather, Apply, MergeBefore, PlanRecorded, PlanSeeds, Shards, MergeRecorded, Merge };
 
 	// The process of one step or shard, not started yet: the caller connects to it, then starts it (on Windows a process
 	// that cannot start reports it inside start()). `allCpus`: on every CPU, as the script's own commands.
 	QProcess* makeTool(const QString& name, const QStringList& arguments, bool claims, bool allCpus = false);
 	void      runStep(Step step);
+	void      beginRecorded();
+	void      gatherRecorded();
 	void      afterStep(Step step, int code, const QString& name);
 	void      scheduleShards();
 	void      shardFinished(const QString& name, int code);
@@ -104,7 +114,8 @@ private:
 	bool                    m_stopping = false;
 	bool                    m_has_recorded = false;
 	bool                    m_tier_merged = false;
-	QString                 m_recorded; // the recorded or hinted seed file of this run (empty: none)
+	QString                 m_recorded; // recorded play's seed file of this run (empty: none)
+	QStringList             m_sources;  // what Gather puts together
 	QQueue<Job>             m_first, m_second;
 	QHash<QString, QProcess*> m_jobs; // running processes by name
 	QHash<QString, Job>     m_job_info;

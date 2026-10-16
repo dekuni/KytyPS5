@@ -55,7 +55,7 @@ QStringList LaunchPlan::dryRunLines() const {
 	if (!titleName.isEmpty()) game_line += titleName + QStringLiteral(", ");
 	game_line += version;
 	if (!tested) {
-		game_line += QStringLiteral(" (untested: the emulator is tested with %1)").arg(GameInfo::testedVersions().join(QStringLiteral(" and ")));
+		game_line += QStringLiteral(" (untested: the emulator supports %1)").arg(GameInfo::testedVersions().join(QStringLiteral(" and ")));
 	}
 	lines << game_line;
 	lines << QStringLiteral("config:   %1").arg(Native(configPath));
@@ -122,6 +122,7 @@ LaunchPlan LaunchPlan::build(const LaunchInputs& in) {
 	const int     language      = s.language;
 	const bool    fps120        = s.fps == 120;
 	const int     render_height = s.output == QStringLiteral("4k") && s.render != 1440 ? s.render : 0;
+	const QString aspect_ratio  = s.output == QStringLiteral("4k") && s.ratio != QStringLiteral("16:9") ? s.ratio : QString();
 	const QString quality       = s.quality != QStringLiteral("standard") ? s.quality : QString();
 	const QString output        = s.output;
 	const QString upscaler      = s.aa != QStringLiteral("taa") ? s.aa : QString();
@@ -198,6 +199,8 @@ LaunchPlan LaunchPlan::build(const LaunchInputs& in) {
 	}
 	// -RenderHeight: the 3D height of the performance mode.
 	if (render_height > 0 && render_height != 1440) env.set(QStringLiteral("KYTY_RENDER_HEIGHT"), QString::number(render_height));
+	// -Aspect: the 3D wider (21:9, 32:9), the game's projection widened to match.
+	if (!aspect_ratio.isEmpty()) env.set(QStringLiteral("KYTY_RENDER_ASPECT"), aspect_ratio);
 	// -Quality: engine settings that cut what a frame draws.
 	if (!quality.isEmpty()) {
 		static const QHash<QString, QString> convars = {

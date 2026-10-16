@@ -20,10 +20,13 @@
 #                                            or its bin\x64; default: a "streamline" folder next to
 #                                            the emulator)
 #   .\run-windows.ps1 -Fps120                the game's frame rate up to 120 fps instead of 60 (a 120 Hz
-#                                            virtual vblank; movies play faster)
+#                                            virtual vblank; movies, menus and loading screens keep 60)
 #   .\run-windows.ps1 -Vblank 240            another virtual vblank rate (default 60, the console's)
 #   .\run-windows.ps1 -RenderHeight 1080     Demon's Souls renders its 3D at 1920x1080 instead of 2560x1440
 #                                            (720-1440; its 4K output and UI stay): faster where the GPU limits
+#   .\run-windows.ps1 -Aspect 21:9           Demon's Souls renders its 3D wider (21:9 = 64:27, up to 32:9; 3416x1440
+#                                            at 21:9), seeing more to the sides; shown at that aspect (the HUD at
+#                                            its sides unstretched, in-game menus stretched), movies at 16:9
 #   .\run-windows.ps1 -Quality low            Demon's Souls draws less (shadows: no ambient or spot-light shadows,
 #                                            sun shadows to 60 m; low / lowest: also simpler shadows and distant
 #                                            detail): faster where the CPU limits
@@ -63,6 +66,7 @@ param(
 	[int]$Vblank = 0,
 	[switch]$Fps120,
 	[int]$RenderHeight = 0,
+	[string]$Aspect = '',
 	[string]$Quality = '',
 	[string]$Output = '',
 	[string]$Upscaler = '',
@@ -309,6 +313,9 @@ if (!$environment.Contains('KYTY_GAME_CONVARS') -and !$Baseline -and $titleId -m
 # the game upscales it to its 3840x2160 output as it does 1440 (a laptop's RTX 3080 at Boletaria 1-1: standing
 # 20.7 -> 24.5 fps at 1080, walking 18.7 -> 22.2).
 if ($RenderHeight -gt 0 -and $RenderHeight -ne 1440) { $environment['KYTY_RENDER_HEIGHT'] = "$RenderHeight" }
+# -Aspect 21:9 (or 32:9, w:h): the 3D rendered at that aspect, its width at the render height (3416x1440), the game's
+# projection widened to match; the presenter shows those frames at the aspect and the others at 16:9.
+if ($Aspect -and $Aspect -ne '16:9') { $environment['KYTY_RENDER_ASPECT'] = $Aspect }
 # -Quality low|lowest: Demon's Souls engine settings that cut what a frame draws, for PCs whose CPU limits the frame
 # rate (each draw costs the emulator CPU time). low: shadows drawn from simpler meshes, levels of detail chosen as for
 # a 720-line picture (1080), sun shadows to 125 m (250); lowest: detail as for 480 lines, sun shadows to 60 m, no
