@@ -1,0 +1,1050 @@
+﻿Internal ctest changing into directory: F:/dev/KytyPS5/_Build/windows
+Test project F:/dev/KytyPS5/_Build/windows
+      Start  1: atrac9_initialization
+ 1/64 Test  #1: atrac9_initialization ...............   Passed    0.06 sec
+      Start  2: emulator_user_name_cli
+ 2/64 Test  #2: emulator_user_name_cli ..............   Passed    0.14 sec
+      Start  3: emulator_user_name_too_long
+ 3/64 Test  #3: emulator_user_name_too_long .........   Passed    0.02 sec
+      Start  4: emulator_present_mode_cli
+ 4/64 Test  #4: emulator_present_mode_cli ...........   Passed    0.02 sec
+      Start  5: emulator_present_mode_invalid
+ 5/64 Test  #5: emulator_present_mode_invalid .......   Passed    0.02 sec
+      Start  6: ime_dialog
+ 6/64 Test  #6: ime_dialog ..........................   Passed    0.05 sec
+      Start  7: shader_cfg
+ 7/64 Test  #7: shader_cfg ..........................Exit code 0xc0000409
+***Exception:   5.40 sec
+ShaderCfgTests: failed: buffer load bounds check was emitted outside EXEC guard
+
+      Start  8: scalar_provenance
+ 8/64 Test  #8: scalar_provenance ...................   Passed    0.05 sec
+      Start  9: image_page_table
+ 9/64 Test  #9: image_page_table ....................   Passed    0.05 sec
+      Start 10: memory_tracker
+10/64 Test #10: memory_tracker ......................Exit code 0xc0000409
+***Exception:   0.13 sec
+MemoryTrackerTests: failed: GPU changes or another region invalidated a local CPU epoch
+
+      Start 11: page_manager
+11/64 Test #11: page_manager ........................   Passed    0.19 sec
+      Start 12: archive_file
+12/64 Test #12: archive_file ........................   Passed    0.26 sec
+      Start 13: demons_souls_copy
+13/64 Test #13: demons_souls_copy ...................   Passed    0.05 sec
+      Start 14: demons_souls_idle
+14/64 Test #14: demons_souls_idle ...................   Passed    0.05 sec
+      Start 15: page_protection_table
+15/64 Test #15: page_protection_table ...............   Passed    0.53 sec
+      Start 16: bit_array
+16/64 Test #16: bit_array ...........................   Passed    0.05 sec
+      Start 17: shader_vertex_metadata
+17/64 Test #17: shader_vertex_metadata ..............   Passed    0.05 sec
+      Start 18: resource_materialization
+18/64 Test #18: resource_materialization ............   Passed    0.07 sec
+      Start 19: resource_tracking
+19/64 Test #19: resource_tracking ...................***Failed    0.07 sec
+shader resource specialization failed: storage image descriptor 1 has an invalid mip range
+resource tracking test failed: invariant indirect images: indirect image mapping retained worst-case padding
+
+      Start 20: event_queue_lifetime
+20/64 Test #20: event_queue_lifetime ................   Passed    0.07 sec
+      Start 21: kernel_file_system
+21/64 Test #21: kernel_file_system ..................Exit code 0xc0000409
+***Exception:   1.29 sec
+Vulkan compute wave64: emulated on 32-lane subgroups (default, device 0x10de:0x2486)
+Vulkan subgroups: 32 lanes by default, 32-32, required sizes for stages 0x3fff
+Video memory: largest device-local heap 8024 MiB, budget 6349 MiB: treated as small (textures may leave video memory past half the budget)
+Video memory (start): 3 MiB in use of 7256 MiB (VMA device-local 0 MiB, plain type 0 MiB in video memory, driver 3 MiB); GPU system memory 15 MiB (plain type 0 MiB, host-visible 0 MiB)
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+KernelFileSystemTests: failed: unsatisfied wait blocks later buffers at its priority without publishing completion
+
+      Start 22: save_data_capacity
+22/64 Test #22: save_data_capacity ..................   Passed    0.06 sec
+      Start 23: fiber_migration
+23/64 Test #23: fiber_migration .....................***Failed    0.09 sec
+--- Build ---
+Source build dc29634-dirty
+--- Fatal Error ---
+Error: condition (g_guest_address_space == nullptr || g_virtual_ranges == nullptr) is true in F:/dev/KytyPS5/src/kernel/memory.cpp:1122
+--- Backtrace --- (exe base 00007FF761D40000)
+  00007FF7622929B1
+  00007FF7622950DD
+  00007FF76229AD6E
+  00007FF761D60C2E
+  00007FF76229C367
+  00007FF761D6096F
+  00007FF76229C1B9
+  00007FF76229C138
+  00007FF76229BFB0
+  00007FF762239B4C
+  00007FF762291580
+  00007FF972B1DDA7
+  00007FF9737FEE4C
+
+      Start 24: sync_on_address
+24/64 Test #24: sync_on_address .....................   Passed    0.41 sec
+      Start 25: audio_out2_port
+25/64 Test #25: audio_out2_port .....................Exit code 0xc0000409
+***Exception:   0.11 sec
+	 buffer      = 0x0000000000000000
+	 buffer_size = 0x0000000000000000
+	 ctx         = 0x0000000000000001
+	 queue_depth = 4, num_grains = 512
+	 ctx           = 0x0000000000000001
+	 port          = 0x0000000000000001
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x0000000000000001
+	 ctx           = 0x0000000000000001
+	 port          = 0x0000000000000002
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x0000000000000002
+	 ctx           = 0x0000000000000001
+	 port          = 0x0000000000000003
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x0000000000000003
+	 ctx           = 0x0000000000000001
+	 port          = 0x0000000000000004
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x0000000000000004
+	 ctx           = 0x0000000000000001
+	 port          = 0x0000000000000005
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x0000000000000005
+	 ctx           = 0x0000000000000001
+	 port          = 0x0000000000000006
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x0000000000000006
+	 ctx           = 0x0000000000000001
+	 port          = 0x0000000000000007
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x0000000000000007
+	 ctx           = 0x0000000000000001
+	 port          = 0x0000000000000008
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x0000000000000008
+	 ctx           = 0x0000000000000001
+	 port          = 0x0000000000000009
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x0000000000000009
+	 ctx           = 0x0000000000000001
+	 port          = 0x000000000000000a
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x000000000000000a
+	 ctx           = 0x0000000000000001
+	 port          = 0x000000000000000b
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x000000000000000b
+	 ctx           = 0x0000000000000001
+	 port          = 0x000000000000000c
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x000000000000000c
+	 ctx           = 0x0000000000000001
+	 port          = 0x000000000000000d
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x000000000000000d
+	 ctx           = 0x0000000000000001
+	 port          = 0x000000000000000e
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x000000000000000e
+	 ctx           = 0x0000000000000001
+	 port          = 0x000000000000000f
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x000000000000000f
+	 ctx           = 0x0000000000000001
+	 port          = 0x0000000000000010
+	 port_type     = 0
+	 data_format   = 0x00000200
+	 sampling_freq = 48000
+	 port = 0x0000000000000010
+	 port = 0x0000000000000011
+	 port = 0x0000000000000012
+	 port = 0x0000000000000013
+	 port = 0x0000000000000014
+	 port = 0x0000000000000015
+	 port = 0x0000000000000016
+	 port = 0x0000000000000017
+	 port = 0x0000000000000018
+	 port = 0x0000000000000019
+	 port = 0x000000000000001a
+	 port = 0x000000000000001b
+	 port = 0x000000000000001c
+	 port = 0x000000000000001d
+	 port = 0x000000000000001e
+	 port = 0x000000000000001f
+	 port = 0x0000000000000020
+	 port = 0x0000000000000021
+	 port = 0x0000000000000022
+	 port = 0x0000000000000023
+	 port = 0x0000000000000024
+	 port = 0x0000000000000025
+	 port = 0x0000000000000026
+	 port = 0x0000000000000027
+	 port = 0x0000000000000028
+	 port = 0x0000000000000029
+	 port = 0x000000000000002a
+	 port = 0x000000000000002b
+	 port = 0x000000000000002c
+	 port = 0x000000000000002d
+	 port = 0x000000000000002e
+	 port = 0x000000000000002f
+	 port = 0x0000000000000030
+	 port = 0x0000000000000031
+	 port = 0x0000000000000032
+	 port = 0x0000000000000033
+	 port = 0x0000000000000034
+	 port = 0x0000000000000035
+	 port = 0x0000000000000036
+	 port = 0x0000000000000037
+	 port = 0x0000000000000038
+	 port = 0x0000000000000039
+	 port = 0x000000000000003a
+	 port = 0x000000000000003b
+	 port = 0x000000000000003c
+	 port = 0x000000000000003d
+	 port = 0x000000000000003e
+	 port = 0x000000000000003f
+	 port = 0x0000000000000040
+	 port = 0x0000000000000041
+	 port = 0x0000000000000042
+	 port = 0x0000000000000043
+	 port = 0x0000000000000044
+	 port = 0x0000000000000045
+	 port = 0x0000000000000046
+	 port = 0x0000000000000047
+	 port = 0x0000000000000048
+	 port = 0x0000000000000049
+	 port = 0x000000000000004a
+	 port = 0x000000000000004b
+	 port = 0x000000000000004c
+	 port = 0x000000000000004d
+	 port = 0x000000000000004e
+	 port = 0x000000000000004f
+	 port = 0x0000000000000050
+	 port = 0x0000000000000051
+	 port = 0x0000000000000052
+	 port = 0x0000000000000053
+	 port = 0x0000000000000054
+	 port = 0x0000000000000055
+	 port = 0x0000000000000056
+	 port = 0x0000000000000057
+	 port = 0x0000000000000058
+	 port = 0x0000000000000059
+	 port = 0x000000000000005a
+	 port = 0x000000000000005b
+	 port = 0x000000000000005c
+	 port = 0x000000000000005d
+	 port = 0x000000000000005e
+	 port = 0x000000000000005f
+	 port = 0x0000000000000060
+	 port = 0x0000000000000061
+	 port = 0x0000000000000062
+	 port = 0x0000000000000063
+	 port = 0x0000000000000064
+	 port = 0x0000000000000065
+	 port = 0x0000000000000066
+	 port = 0x0000000000000067
+	 port = 0x0000000000000068
+	 port = 0x0000000000000069
+	 port = 0x000000000000006a
+	 port = 0x000000000000006b
+	 port = 0x000000000000006c
+	 port = 0x000000000000006d
+	 port = 0x000000000000006e
+	 port = 0x000000000000006f
+	 port = 0x0000000000000070
+	 port = 0x0000000000000071
+	 port = 0x0000000000000072
+	 port = 0x0000000000000073
+	 port = 0x0000000000000074
+	 port = 0x0000000000000075
+	 port = 0x0000000000000076
+	 port = 0x0000000000000077
+	 port = 0x0000000000000078
+	 port = 0x0000000000000079
+	 port = 0x000000000000007a
+	 port = 0x000000000000007b
+	 port = 0x000000000000007c
+	 port = 0x000000000000007d
+	 port = 0x000000000000007e
+	 port = 0x000000000000007f
+	 port = 0x0000000000000080
+	 port = 0x0000000000000081
+	 port = 0x0000000000000082
+	 port = 0x0000000000000083
+	 port = 0x0000000000000084
+	 port = 0x0000000000000085
+	 port = 0x0000000000000086
+	 port = 0x0000000000000087
+	 port = 0x0000000000000088
+	 port = 0x0000000000000089
+	 port = 0x000000000000008a
+	 port = 0x000000000000008b
+	 port = 0x000000000000008c
+	 port = 0x000000000000008d
+	 port = 0x000000000000008e
+	 port = 0x000000000000008f
+	 port = 0x0000000000000090
+	 port = 0x0000000000000091
+	 port = 0x0000000000000092
+	 port = 0x0000000000000093
+	 port = 0x0000000000000094
+	 port = 0x0000000000000095
+	 port = 0x0000000000000096
+	 port = 0x0000000000000097
+	 port = 0x0000000000000098
+	 port = 0x0000000000000099
+	 port = 0x000000000000009a
+	 port = 0x000000000000009b
+	 port = 0x000000000000009c
+	 port = 0x000000000000009d
+	 port = 0x000000000000009e
+	 port = 0x000000000000009f
+	 port = 0x00000000000000a0
+	 port = 0x00000000000000a1
+	 port = 0x00000000000000a2
+	 port = 0x00000000000000a3
+	 port = 0x00000000000000a4
+	 port = 0x00000000000000a5
+	 port = 0x00000000000000a6
+	 port = 0x00000000000000a7
+	 port = 0x00000000000000a8
+	 port = 0x00000000000000a9
+	 port = 0x00000000000000aa
+	 port = 0x00000000000000ab
+	 port = 0x00000000000000ac
+	 port = 0x00000000000000ad
+	 port = 0x00000000000000ae
+	 port = 0x00000000000000af
+	 port = 0x00000000000000b0
+	 port = 0x00000000000000b1
+	 port = 0x00000000000000b2
+	 port = 0x00000000000000b3
+	 port = 0x00000000000000b4
+	 port = 0x00000000000000b5
+	 port = 0x00000000000000b6
+	 port = 0x00000000000000b7
+	 port = 0x00000000000000b8
+	 port = 0x00000000000000b9
+	 port = 0x00000000000000ba
+	 port = 0x00000000000000bb
+	 port = 0x00000000000000bc
+	 port = 0x00000000000000bd
+	 port = 0x00000000000000be
+	 port = 0x00000000000000bf
+	 port = 0x00000000000000c0
+	 port = 0x00000000000000c1
+	 port = 0x00000000000000c2
+	 port = 0x00000000000000c3
+	 port = 0x00000000000000c4
+	 port = 0x00000000000000c5
+	 port = 0x00000000000000c6
+	 port = 0x00000000000000c7
+	 port = 0x00000000000000c8
+	 port = 0x00000000000000c9
+	 port = 0x00000000000000ca
+	 port = 0x00000000000000cb
+	 port = 0x00000000000000cc
+	 port = 0x00000000000000cd
+	 port = 0x00000000000000ce
+	 port = 0x00000000000000cf
+	 port = 0x00000000000000d0
+	 port = 0x00000000000000d1
+	 port = 0x00000000000000d2
+	 port = 0x00000000000000d3
+	 port = 0x00000000000000d4
+	 port = 0x00000000000000d5
+	 port = 0x00000000000000d6
+	 port = 0x00000000000000d7
+	 port = 0x00000000000000d8
+	 port = 0x00000000000000d9
+	 port = 0x00000000000000da
+	 port = 0x00000000000000db
+	 port = 0x00000000000000dc
+	 port = 0x00000000000000dd
+	 port = 0x00000000000000de
+	 port = 0x00000000000000df
+	 port = 0x00000000000000e0
+	 port = 0x00000000000000e1
+	 port = 0x00000000000000e2
+	 port = 0x00000000000000e3
+	 port = 0x00000000000000e4
+	 port = 0x00000000000000e5
+	 port = 0x00000000000000e6
+	 port = 0x00000000000000e7
+	 port = 0x00000000000000e8
+	 port = 0x00000000000000e9
+	 port = 0x00000000000000ea
+	 port = 0x00000000000000eb
+	 port = 0x00000000000000ec
+	 port = 0x00000000000000ed
+	 port = 0x00000000000000ee
+	 port = 0x00000000000000ef
+	 port = 0x00000000000000f0
+	 port = 0x00000000000000f1
+	 port = 0x00000000000000f2
+	 port = 0x00000000000000f3
+	 port = 0x00000000000000f4
+	 port = 0x00000000000000f5
+	 port = 0x00000000000000f6
+	 port = 0x00000000000000f7
+	 port = 0x00000000000000f8
+	 port = 0x00000000000000f9
+	 port = 0x00000000000000fa
+	 port = 0x00000000000000fb
+	 port = 0x00000000000000fc
+	 port = 0x00000000000000fd
+	 port = 0x00000000000000fe
+	 port = 0x00000000000000ff
+	 port = 0x0000000000000100
+	 port = 0x0000000000000101
+	 port = 0x0000000000000102
+	 port = 0x0000000000000103
+	 port = 0x0000000000000104
+	 port = 0x0000000000000105
+	 port = 0x0000000000000106
+	 port = 0x0000000000000107
+	 port = 0x0000000000000108
+	 port = 0x0000000000000109
+	 port = 0x000000000000010a
+	 port = 0x000000000000010b
+	 port = 0x000000000000010c
+	 port = 0x000000000000010d
+	 port = 0x000000000000010e
+	 port = 0x000000000000010f
+	 port = 0x0000000000000110
+	 port = 0x0000000000000111
+	 port = 0x0000000000000112
+	 port = 0x0000000000000113
+	 port = 0x0000000000000114
+	 port = 0x0000000000000115
+	 port = 0x0000000000000116
+	 port = 0x0000000000000117
+	 port = 0x0000000000000118
+	 port = 0x0000000000000119
+	 port = 0x000000000000011a
+	 port = 0x000000000000011b
+	 port = 0x000000000000011c
+	 port = 0x000000000000011d
+	 port = 0x000000000000011e
+	 port = 0x000000000000011f
+	 port = 0x0000000000000120
+	 port = 0x0000000000000121
+	 port = 0x0000000000000122
+	 port = 0x0000000000000123
+	 port = 0x0000000000000124
+	 port = 0x0000000000000125
+	 port = 0x0000000000000126
+	 port = 0x0000000000000127
+	 port = 0x0000000000000128
+	 port = 0x0000000000000129
+	 port = 0x000000000000012a
+	 port = 0x000000000000012b
+	 port = 0x000000000000012c
+	 ctx = 0x0000000000000001
+	 buffer      = 0x0000000000000000
+	 buffer_size = 0x0000000000000000
+	 ctx         = 0x0000000000000002
+	 queue_depth = 4, num_grains = 512
+	 port = 0x000000000000012d
+	 port = 0x000000000000012e
+	 port = 0x000000000000012f
+	 port = 0x0000000000000130
+	 port = 0x0000000000000131
+	 port = 0x0000000000000132
+	 port = 0x0000000000000133
+	 port = 0x0000000000000134
+	 port = 0x0000000000000135
+	 port = 0x0000000000000136
+	 port = 0x0000000000000137
+	 port = 0x0000000000000138
+	 port = 0x0000000000000139
+	 port = 0x000000000000013a
+	 port = 0x000000000000013b
+	 port = 0x000000000000013c
+	 port = 0x000000000000013d
+	 port = 0x000000000000013e
+	 port = 0x000000000000013f
+	 port = 0x0000000000000140
+	 port = 0x0000000000000141
+	 port = 0x0000000000000142
+	 port = 0x0000000000000143
+	 port = 0x0000000000000144
+	 port = 0x0000000000000145
+	 port = 0x0000000000000146
+	 port = 0x0000000000000147
+	 port = 0x0000000000000148
+	 port = 0x0000000000000149
+	 port = 0x000000000000014a
+	 port = 0x000000000000014b
+	 port = 0x000000000000014c
+	 port = 0x000000000000014d
+	 port = 0x000000000000014e
+	 port = 0x000000000000014f
+	 port = 0x0000000000000150
+	 port = 0x0000000000000151
+	 port = 0x0000000000000152
+	 port = 0x0000000000000153
+	 port = 0x0000000000000154
+	 port = 0x0000000000000155
+	 port = 0x0000000000000156
+	 port = 0x0000000000000157
+	 port = 0x0000000000000158
+	 port = 0x0000000000000159
+	 port = 0x000000000000015a
+	 port = 0x000000000000015b
+	 port = 0x000000000000015c
+	 port = 0x000000000000015d
+	 port = 0x000000000000015e
+	 port = 0x000000000000015f
+	 port = 0x0000000000000160
+	 port = 0x0000000000000161
+	 port = 0x0000000000000162
+	 port = 0x0000000000000163
+	 port = 0x0000000000000164
+	 port = 0x0000000000000165
+	 port = 0x0000000000000166
+	 port = 0x0000000000000167
+	 port = 0x0000000000000168
+	 port = 0x0000000000000169
+	 port = 0x000000000000016a
+	 port = 0x000000000000016b
+	 port = 0x000000000000016c
+	 port = 0x000000000000016d
+	 port = 0x000000000000016e
+	 port = 0x000000000000016f
+	 port = 0x0000000000000170
+	 port = 0x0000000000000171
+	 port = 0x0000000000000172
+	 port = 0x0000000000000173
+	 port = 0x0000000000000174
+	 port = 0x0000000000000175
+	 port = 0x0000000000000176
+	 port = 0x0000000000000177
+	 port = 0x0000000000000178
+	 port = 0x0000000000000179
+	 port = 0x000000000000017a
+	 port = 0x000000000000017b
+	 port = 0x000000000000017c
+	 port = 0x000000000000017d
+	 port = 0x000000000000017e
+	 port = 0x000000000000017f
+	 port = 0x0000000000000180
+	 port = 0x0000000000000181
+	 port = 0x0000000000000182
+	 port = 0x0000000000000183
+	 port = 0x0000000000000184
+	 port = 0x0000000000000185
+	 port = 0x0000000000000186
+	 port = 0x0000000000000187
+	 port = 0x0000000000000188
+	 port = 0x0000000000000189
+	 port = 0x000000000000018a
+	 port = 0x000000000000018b
+	 port = 0x000000000000018c
+	 port = 0x000000000000018d
+	 port = 0x000000000000018e
+	 port = 0x000000000000018f
+	 port = 0x0000000000000190
+	 port = 0x0000000000000191
+	 port = 0x0000000000000192
+	 port = 0x0000000000000193
+	 port = 0x0000000000000194
+	 port = 0x0000000000000195
+	 port = 0x0000000000000196
+	 port = 0x0000000000000197
+	 port = 0x0000000000000198
+	 port = 0x0000000000000199
+	 port = 0x000000000000019a
+	 port = 0x000000000000019b
+	 port = 0x000000000000019c
+	 port = 0x000000000000019d
+	 port = 0x000000000000019e
+	 port = 0x000000000000019f
+	 port = 0x00000000000001a0
+	 port = 0x00000000000001a1
+	 port = 0x00000000000001a2
+	 port = 0x00000000000001a3
+	 port = 0x00000000000001a4
+	 port = 0x00000000000001a5
+	 port = 0x00000000000001a6
+	 port = 0x00000000000001a7
+	 port = 0x00000000000001a8
+	 port = 0x00000000000001a9
+	 port = 0x00000000000001aa
+	 port = 0x00000000000001ab
+	 port = 0x00000000000001ac
+	 port = 0x00000000000001ad
+	 port = 0x00000000000001ae
+	 port = 0x00000000000001af
+	 port = 0x00000000000001b0
+	 port = 0x00000000000001b1
+	 port = 0x00000000000001b2
+	 port = 0x00000000000001b3
+	 port = 0x00000000000001b4
+	 port = 0x00000000000001b5
+	 port = 0x00000000000001b6
+	 port = 0x00000000000001b7
+	 port = 0x00000000000001b8
+	 port = 0x00000000000001b9
+	 port = 0x00000000000001ba
+	 port = 0x00000000000001bb
+	 port = 0x00000000000001bc
+	 port = 0x00000000000001bd
+	 port = 0x00000000000001be
+	 port = 0x00000000000001bf
+	 port = 0x00000000000001c0
+	 port = 0x00000000000001c1
+	 port = 0x00000000000001c2
+	 port = 0x00000000000001c3
+	 port = 0x00000000000001c4
+	 port = 0x00000000000001c5
+	 port = 0x00000000000001c6
+	 port = 0x00000000000001c7
+	 port = 0x00000000000001c8
+	 port = 0x00000000000001c9
+	 port = 0x00000000000001ca
+	 port = 0x00000000000001cb
+	 port = 0x00000000000001cc
+	 port = 0x00000000000001cd
+	 port = 0x00000000000001ce
+	 port = 0x00000000000001cf
+	 port = 0x00000000000001d0
+	 port = 0x00000000000001d1
+	 port = 0x00000000000001d2
+	 port = 0x00000000000001d3
+	 port = 0x00000000000001d4
+	 port = 0x00000000000001d5
+	 port = 0x00000000000001d6
+	 port = 0x00000000000001d7
+	 port = 0x00000000000001d8
+	 port = 0x00000000000001d9
+	 port = 0x00000000000001da
+	 port = 0x00000000000001db
+	 port = 0x00000000000001dc
+	 port = 0x00000000000001dd
+	 port = 0x00000000000001de
+	 port = 0x00000000000001df
+	 port = 0x00000000000001e0
+	 port = 0x00000000000001e1
+	 port = 0x00000000000001e2
+	 port = 0x00000000000001e3
+	 port = 0x00000000000001e4
+	 port = 0x00000000000001e5
+	 port = 0x00000000000001e6
+	 port = 0x00000000000001e7
+	 port = 0x00000000000001e8
+	 port = 0x00000000000001e9
+	 port = 0x00000000000001ea
+	 port = 0x00000000000001eb
+	 port = 0x00000000000001ec
+	 port = 0x00000000000001ed
+	 port = 0x00000000000001ee
+	 port = 0x00000000000001ef
+	 port = 0x00000000000001f0
+	 port = 0x00000000000001f1
+	 port = 0x00000000000001f2
+	 port = 0x00000000000001f3
+	 port = 0x00000000000001f4
+	 port = 0x00000000000001f5
+	 port = 0x00000000000001f6
+	 port = 0x00000000000001f7
+	 port = 0x00000000000001f8
+	 port = 0x00000000000001f9
+	 port = 0x00000000000001fa
+	 port = 0x00000000000001fb
+	 port = 0x00000000000001fc
+	 port = 0x00000000000001fd
+	 port = 0x00000000000001fe
+	 port = 0x00000000000001ff
+	 port = 0x0000000000000200
+	 port = 0x0000000000000201
+	 port = 0x0000000000000202
+	 port = 0x0000000000000203
+	 port = 0x0000000000000204
+	 port = 0x0000000000000205
+	 port = 0x0000000000000206
+	 port = 0x0000000000000207
+	 port = 0x0000000000000208
+	 port = 0x0000000000000209
+	 port = 0x000000000000020a
+	 port = 0x000000000000020b
+	 port = 0x000000000000020c
+	 port = 0x000000000000020d
+	 port = 0x000000000000020e
+	 port = 0x000000000000020f
+	 port = 0x0000000000000210
+	 port = 0x0000000000000211
+	 port = 0x0000000000000212
+	 port = 0x0000000000000213
+	 port = 0x0000000000000214
+	 port = 0x0000000000000215
+	 port = 0x0000000000000216
+	 port = 0x0000000000000217
+	 port = 0x0000000000000218
+	 port = 0x0000000000000219
+	 port = 0x000000000000021a
+	 port = 0x000000000000021b
+	 port = 0x000000000000021c
+	 port = 0x000000000000021d
+	 port = 0x000000000000021e
+	 port = 0x000000000000021f
+	 port = 0x0000000000000220
+	 port = 0x0000000000000221
+	 port = 0x0000000000000222
+	 port = 0x0000000000000223
+	 port = 0x0000000000000224
+	 port = 0x0000000000000225
+	 port = 0x0000000000000226
+	 port = 0x0000000000000227
+	 port = 0x0000000000000228
+	 port = 0x0000000000000229
+	 port = 0x000000000000022a
+	 port = 0x000000000000022b
+	 port = 0x000000000000022c
+	 port = 0x000000000000022e
+	 ctx = 0x0000000000000002
+	 buffer      = 0x0000000000000000
+	 buffer_size = 0x0000000000000000
+	 ctx         = 0x0000000000000003
+	 queue_depth = 4, num_grains = 512
+	 port = 0x000000000000022f
+	 port = 0x0000000000000235
+	 port = 0x0000000000000231
+	 port = 0x0000000000000230
+	 port = 0x0000000000000232
+	 port = 0x0000000000000233
+	 port = 0x0000000000000234
+	 port = 0x0000000000000236
+	 ctx = 0x0000000000000003
+	 buffer      = 0x0000000000000000
+	 buffer_size = 0x0000000000000000
+	 ctx         = 0x0000000000000004
+	 queue_depth = 4, num_grains = 512
+	 ctx = 0x0000000000000004
+	 buffer      = 0x0000000000000000
+	 buffer_size = 0x0000000000000000
+	 ctx         = 0x0000000000000005
+	 queue_depth = 1, num_grains = 512
+AudioOut2: the game pushes blocking
+	 port = 0x0000000000000238
+	 ctx = 0x0000000000000005
+	 buffer      = 0x0000000000000000
+	 buffer_size = 0x0000000000000000
+	 ctx         = 0x0000000000000006
+	 queue_depth = 4, num_grains = 512
+	 port = 0x0000000000000239
+	 ctx = 0x0000000000000006
+	 buffer      = 0x0000000000000000
+	 buffer_size = 0x0000000000000000
+	 ctx         = 0x0000000000000007
+	 queue_depth = 1, num_grains = 512
+AudioOut2PortTests: failed: full async queue accepted another buffer
+
+      Start 26: shader_recompiler_compute
+26/64 Test #26: shader_recompiler_compute ...........Exit code 0xc0000409
+***Exception:   1.42 sec
+[host]    LeastRecentlyUsedCache           ok
+[host]    RenderTargetFormat               ok
+ShaderRecompilerComputeTests: SampledColorViews failed at host: volume-mip-count component mapping did not report a fatal error
+
+      Start 27: native_dispatch_indirect
+27/64 Test #27: native_dispatch_indirect ............   Passed    0.58 sec
+      Start 28: cpu_write_window
+28/64 Test #28: cpu_write_window ....................***Exception: SegFault  0.56 sec
+[host]    LeastRecentlyUsedCache           ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+[gpu]     CpuWriteWindow                   ok
+
+      Start 29: shader_recompiler_alignbyte
+29/64 Test #29: shader_recompiler_alignbyte .........   Passed    0.26 sec
+      Start 30: guest_stack_exit
+30/64 Test #30: guest_stack_exit ....................   Passed    0.11 sec
+      Start 31: virtual_memory_allocation
+31/64 Test #31: virtual_memory_allocation ...........   Passed   39.36 sec
+      Start 32: guest_red_zone_patcher
+32/64 Test #32: guest_red_zone_patcher ..............   Passed    0.02 sec
+      Start 33: shader_lod_feedback
+33/64 Test #33: shader_lod_feedback .................   Passed    1.67 sec
+      Start 34: demons_souls_compute_chain
+34/64 Test #34: demons_souls_compute_chain ..........Exit code 0xc0000409
+***Exception:   0.08 sec
+[host]    LeastRecentlyUsedCache           ok
+ShaderRecompilerComputeTests: DemonsSoulsProfile failed at title isolation: another title enabled the profile
+
+      Start 35: compute_stream_submission
+35/64 Test #35: compute_stream_submission ...........Exit code 0xc0000409
+***Exception:   0.49 sec
+[host]    LeastRecentlyUsedCache           ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+ShaderRecompilerComputeTests: StreamingCompute failed at bounded asynchronous submissions: the recorded dispatch batch did not submit at its fixed bound
+
+      Start 36: command_scheduler_timeline
+36/64 Test #36: command_scheduler_timeline ..........   Passed    0.40 sec
+      Start 37: stream_buffer_ring
+37/64 Test #37: stream_buffer_ring ..................   Passed    0.51 sec
+      Start 38: gpu_command_lane
+38/64 Test #38: gpu_command_lane ....................Exit code 0xc0000409
+***Exception:   0.77 sec
+[host]    LeastRecentlyUsedCache           ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+ShaderRecompilerComputeTests: GpuCommandLane failed at unmap native completion: unmap returned before an earlier native guest-memory callback
+
+      Start 39: pm4_context_state
+39/64 Test #39: pm4_context_state ...................   Passed    0.37 sec
+      Start 40: gpu_tiler
+40/64 Test #40: gpu_tiler ...........................   Passed    3.86 sec
+      Start 41: texture_resolution_cache
+41/64 Test #41: texture_resolution_cache ............Exit code 0xc0000409
+***Exception:   0.50 sec
+[host]    LeastRecentlyUsedCache           ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+TextureCache: 0x2036f0000+0x10000 as the texels of its blocks (fmt 75 64x64 levels 1 from fmt 173 256x256 levels 1)
+ShaderRecompilerComputeTests: TextureResolutionCache failed at compressed atlas storage reuse: BC3 sampling replaced the GPU atlas on its next raw-block write
+
+      Start 42: texture_cache_layered_image
+42/64 Test #42: texture_cache_layered_image .........   Passed    0.39 sec
+      Start 43: host_image_allocation
+43/64 Test #43: host_image_allocation ...............   Passed    0.37 sec
+      Start 44: texture_cache_image_views
+44/64 Test #44: texture_cache_image_views ...........   Passed    0.39 sec
+      Start 45: texture_cache_storage_sampled
+45/64 Test #45: texture_cache_storage_sampled .......   Passed    0.39 sec
+      Start 46: texture_cache_depth_readback
+46/64 Test #46: texture_cache_depth_readback ........   Passed    0.02 sec
+      Start 47: compute_meta_clear_classification
+47/64 Test #47: compute_meta_clear_classification ...Exit code 0xc0000409
+***Exception:   0.50 sec
+[host]    LeastRecentlyUsedCache           ok
+[host]    DynamicRenderingState            ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+ShaderRecompilerComputeTests: ComputeMetaClearClassification failed at HTile fixture: test HTile entries were not registered in their initial state
+
+      Start 48: buffer_cache_dirty_gc
+48/64 Test #48: buffer_cache_dirty_gc ...............Exit code 0xc0000409
+***Exception:   0.63 sec
+[host]    LeastRecentlyUsedCache           ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+ShaderRecompilerComputeTests: BufferCacheDirtyGarbageCollection failed at invalidation retains owners: CPU invalidation retired a reusable Buffer owner
+
+      Start 49: texture_cache_image_overlap
+49/64 Test #49: texture_cache_image_overlap .........Exit code 0xc0000409
+***Exception:   2.08 sec
+[host]    LeastRecentlyUsedCache           ok
+[host]    DepthAttachmentWrites            ok
+[host]    DynamicRenderingState            ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+[gpu]     PolygonModeRasterization         ok
+Pipelines compiled unoptimized first: 3, replaced by their optimized build: 2
+Shader plans: 0 out of memory at the end, 0 brought back by the render thread, 0 beside it (0 of those used)
+Made where first needed: 0 programs translated (0 ms), 3 pipelines (29 ms)
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+Pipelines compiled unoptimized first: 0, replaced by their optimized build: 0
+Shader plans: 0 out of memory at the end, 0 brought back by the render thread, 0 beside it (0 of those used)
+Made where first needed: 0 programs translated (0 ms), 0 pipelines (0 ms)
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+Pipelines compiled unoptimized first: 0, replaced by their optimized build: 0
+Shader plans: 0 out of memory at the end, 0 brought back by the render thread, 0 beside it (0 of those used)
+Made where first needed: 0 programs translated (0 ms), 0 pipelines (0 ms)
+[gpu]     RenderExecutorColorDiscovery     ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+Pipelines compiled unoptimized first: 0, replaced by their optimized build: 0
+Shader plans: 0 out of memory at the end, 0 brought back by the render thread, 0 beside it (0 of those used)
+Made where first needed: 0 programs translated (0 ms), 0 pipelines (0 ms)
+[gpu]     RenderExecutorColorVolumeDiscovery ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+Pipelines compiled unoptimized first: 0, replaced by their optimized build: 0
+Shader plans: 0 out of memory at the end, 0 brought back by the render thread, 0 beside it (0 of those used)
+Made where first needed: 0 programs translated (0 ms), 0 pipelines (0 ms)
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+Pipelines compiled unoptimized first: 0, replaced by their optimized build: 0
+Shader plans: 0 out of memory at the end, 0 brought back by the render thread, 0 beside it (0 of those used)
+Made where first needed: 0 programs translated (0 ms), 0 pipelines (0 ms)
+[gpu]     RenderExecutorDccFixedClearFloat ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+Pipelines compiled unoptimized first: 0, replaced by their optimized build: 0
+Shader plans: 0 out of memory at the end, 0 brought back by the render thread, 0 beside it (0 of those used)
+Made where first needed: 0 programs translated (0 ms), 0 pipelines (0 ms)
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+Pipelines compiled unoptimized first: 0, replaced by their optimized build: 0
+Shader plans: 0 out of memory at the end, 0 brought back by the render thread, 0 beside it (0 of those used)
+Made where first needed: 0 programs translated (0 ms), 0 pipelines (0 ms)
+[gpu]     SampledDccClear                  ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+Pipelines compiled unoptimized first: 0, replaced by their optimized build: 0
+Shader plans: 0 out of memory at the end, 0 brought back by the render thread, 0 beside it (0 of those used)
+Made where first needed: 0 programs translated (0 ms), 0 pipelines (0 ms)
+[gpu]     RenderExecutorColorDepthTile     ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+TextureCache: 0x2036f0000+0x10000 as the texels of its blocks (fmt 75 64x64 levels 1 from fmt 173 256x256 levels 1)
+ShaderRecompilerComputeTests: RenderExecutorStencilBindingDiscovery failed at compressed atlas storage reuse: BC3 sampling replaced the GPU atlas on its next raw-block write
+
+      Start 50: texture_cache_htile_clear
+50/64 Test #50: texture_cache_htile_clear ...........Exit code 0xc0000409
+***Exception:   0.67 sec
+[host]    LeastRecentlyUsedCache           ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+ShaderRecompilerComputeTests: UnifiedTextureCacheFlow failed at formatted Buffer content: formatted Buffer read bypassed authoritative native image mip data
+
+      Start 51: buffer_cache_ranges
+51/64 Test #51: buffer_cache_ranges .................Exit code 0xc0000409
+***Exception:   0.60 sec
+[host]    LeastRecentlyUsedCache           ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+ShaderRecompilerComputeTests: UnifiedTextureCacheFlow failed at formatted Buffer content: formatted Buffer read bypassed authoritative native image mip data
+
+      Start 52: vulkan_recording
+52/64 Test #52: vulkan_recording ....................   Passed    0.05 sec
+      Start 53: specialization_guard
+53/64 Test #53: specialization_guard ................   Passed    1.09 sec
+      Start 54: native_pipeline_index
+54/64 Test #54: native_pipeline_index ...............   Passed    0.89 sec
+      Start 55: draw_run_ranges
+55/64 Test #55: draw_run_ranges .....................   Passed    0.88 sec
+      Start 56: binding_scratch
+56/64 Test #56: binding_scratch .....................Exit code 0xc0000409
+***Exception:   0.79 sec
+[host]    LeastRecentlyUsedCache           ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+[host]    PreparedBindingScratch           ok
+Pipelines compiled unoptimized first: 0, replaced by their optimized build: 0
+Shader plans: 0 out of memory at the end, 0 brought back by the render thread, 0 beside it (0 of those used)
+Made where first needed: 0 programs translated (0 ms), 0 pipelines (0 ms)
+ShaderRecompilerComputeTests: UnifiedTextureCacheFlow failed at formatted Buffer content: formatted Buffer read bypassed authoritative native image mip data
+
+      Start 57: portable_formats_emission
+57/64 Test #57: portable_formats_emission ...........   Passed    0.07 sec
+      Start 58: portable_formats
+58/64 Test #58: portable_formats ....................   Passed   11.47 sec
+      Start 59: shader_upload_ring
+59/64 Test #59: shader_upload_ring ..................Exit code 0xc0000409
+***Exception:   0.94 sec
+[host]    LeastRecentlyUsedCache           ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+[gpu]     ShaderUploadRing                 ok
+[gpu]     StreamSnapshots                  ok
+ShaderRecompilerComputeTests: UnifiedTextureCacheFlow failed at formatted Buffer content: formatted Buffer read bypassed authoritative native image mip data
+
+      Start 60: host_backing_read
+60/64 Test #60: host_backing_read ...................Exit code 0xc0000409
+***Exception:   0.67 sec
+[host]    LeastRecentlyUsedCache           ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+[gpu]     HostBackingReadTransactions      ok
+ShaderRecompilerComputeTests: UnifiedTextureCacheFlow failed at formatted Buffer content: formatted Buffer read bypassed authoritative native image mip data
+
+      Start 61: buffer_cache_guest_readback
+61/64 Test #61: buffer_cache_guest_readback .........***Exception: SegFault  0.58 sec
+[host]    LeastRecentlyUsedCache           ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+
+      Start 62: copy_feedback
+62/64 Test #62: copy_feedback .......................Exit code 0xc0000409
+***Exception:   0.58 sec
+[host]    LeastRecentlyUsedCache           ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+ShaderRecompilerComputeTests: CompletedCopyFeedback failed at mapping epoch fallback: mapping change reused an old snapshot
+
+      Start 63: write_window_handoff
+63/64 Test #63: write_window_handoff ................***Exception: SegFault  0.57 sec
+[host]    LeastRecentlyUsedCache           ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+[gpu]     CpuWriteWindow                   ok
+
+      Start 64: async_write_readback
+64/64 Test #64: async_write_readback ................Exit code 0xc0000409
+***Exception:   0.58 sec
+[host]    LeastRecentlyUsedCache           ok
+Pipelines in no cache: made unoptimized first, the optimized build replaces them (KYTY_PIPELINE_FAST_BUILD=0: optimized at once)
+ShaderRecompilerComputeTests: AsyncWriteReadback failed at pending: the write did not wait for the download
+
+
+63% tests passed, 24 tests failed out of 64
+
+Total Test time (real) =  85.61 sec
+
+The following tests FAILED:
+	  7 - shader_cfg (Exit code 0xc0000409
+)
+	 10 - memory_tracker (Exit code 0xc0000409
+)
+	 19 - resource_tracking (Failed)
+	 21 - kernel_file_system (Exit code 0xc0000409
+)
+	 23 - fiber_migration (Failed)
+	 25 - audio_out2_port (Exit code 0xc0000409
+)
+	 26 - shader_recompiler_compute (Exit code 0xc0000409
+)
+	 28 - cpu_write_window (SEGFAULT)
+	 34 - demons_souls_compute_chain (Exit code 0xc0000409
+)
+	 35 - compute_stream_submission (Exit code 0xc0000409
+)
+	 38 - gpu_command_lane (Exit code 0xc0000409
+)
+	 41 - texture_resolution_cache (Exit code 0xc0000409
+)
+	 47 - compute_meta_clear_classification (Exit code 0xc0000409
+)
+	 48 - buffer_cache_dirty_gc (Exit code 0xc0000409
+)
+	 49 - texture_cache_image_overlap (Exit code 0xc0000409
+)
+	 50 - texture_cache_htile_clear (Exit code 0xc0000409
+)
+	 51 - buffer_cache_ranges (Exit code 0xc0000409
+)
+	 56 - binding_scratch (Exit code 0xc0000409
+)
+	 59 - shader_upload_ring (Exit code 0xc0000409
+)
+	 60 - host_backing_read (Exit code 0xc0000409
+)
+	 61 - buffer_cache_guest_readback (SEGFAULT)
+	 62 - copy_feedback (Exit code 0xc0000409
+)
+	 63 - write_window_handoff (SEGFAULT)
+	 64 - async_write_readback (Exit code 0xc0000409
+)
+ctest.exe : Errors while running CTest
+No F:\dev\report-tools\build-and-test.ps1:38 caractere:1
++ & $ctest --test-dir (Join-Path $Repo '_Build\windows') --output-on-fa ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Errors while running CTest:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

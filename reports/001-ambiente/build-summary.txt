@@ -1,0 +1,46 @@
+﻿
+commit: dc296347cf739cfbbc66a47d22fe53e85645c478
+local changes:  M CMakeLists.txt;  M tests/AudioOut2PortTests.cpp;  M tests/ImeDialogTests.cpp;  M tests/MemoryTrackerTests.cpp;  M tests/PageManagerTests.cpp
+=== [20:34:03] build kyty_emulator ===
+=== build kyty_emulator exit=0 minutes=2.2 ===
+kyty_emulator.exe sha256: 11C1D1E39F2A5CEFADA6A70FE9C040AE117B33BE28A34F3928F0EF05C0493012
+=== [20:36:14] ctest ===
+=== ctest exit=8 minutes=1.4 ===
+***Exception:   5.40 sec
+***Exception:   0.13 sec
+19/64 Test #19: resource_tracking ...................***Failed    0.07 sec
+***Exception:   1.29 sec
+23/64 Test #23: fiber_migration .....................***Failed    0.09 sec
+***Exception:   0.11 sec
+***Exception:   1.42 sec
+28/64 Test #28: cpu_write_window ....................***Exception: SegFault  0.56 sec
+***Exception:   0.08 sec
+***Exception:   0.49 sec
+***Exception:   0.77 sec
+***Exception:   0.50 sec
+***Exception:   0.50 sec
+***Exception:   0.63 sec
+***Exception:   2.08 sec
+***Exception:   0.67 sec
+***Exception:   0.60 sec
+***Exception:   0.79 sec
+***Exception:   0.94 sec
+***Exception:   0.67 sec
+61/64 Test #61: buffer_cache_guest_readback .........***Exception: SegFault  0.58 sec
+***Exception:   0.58 sec
+63/64 Test #63: write_window_handoff ................***Exception: SegFault  0.57 sec
+***Exception:   0.58 sec
+63% tests passed, 24 tests failed out of 64
+The following tests FAILED:
+    + CategoryInfo          : NotSpecified: (Errors while running CTest:String) [], RemoteException
+DONE
+
+﻿
+commit: f225a627efe635f05ba6bc6d1e5dc7cd12ef915f
+local changes: 
+=== [20:39:20] build kyty_emulator ===
+=== build kyty_emulator exit=0 minutes=0.8 ===
+=== [20:40:11] build kyty_shader_precompile ===
+=== build kyty_shader_precompile exit=0 minutes=2.2 ===
+kyty_emulator.exe sha256: B7670CF1DACCDC90B57E9F73C1C1E6AA73EB0CC52510B44CF95CC45FF08D890B
+DONE (no tests)

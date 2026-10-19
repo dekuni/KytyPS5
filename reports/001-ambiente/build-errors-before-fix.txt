@@ -1,0 +1,35 @@
+# Erros de build do kyty_tests em dc29634 (Windows, clang-cl 19.1.7 + lld-link), antes das correções
+
+## Compilação (alvos de teste que compilam as fontes do emulador sem KYTY_LOCAL_VULKAN_RECORDING)
+FAILED: CMakeFiles/fiber_migration_tests.dir/src/graphics/guest_gpu/graphicsRun.cpp.obj 
+src/graphics/guest_gpu/graphicsRun.cpp(1437,15): error: use of undeclared identifier 'LocalVulkanRecording'
+FAILED: CMakeFiles/fiber_migration_tests.dir/src/graphics/host_gpu/renderer/cache/bufferCache.cpp.obj 
+src/graphics/host_gpu/renderer/cache/bufferCache.cpp(2117,43): error: use of undeclared identifier 'LocalVulkanRecording'
+src/graphics/host_gpu/renderer/cache/bufferCache.cpp(2136,8): error: use of undeclared identifier 'LocalVulkanRecording'
+src/graphics/host_gpu/renderer/cache/bufferCache.cpp(2137,7): error: use of undeclared identifier 'LocalVulkanRecording'
+src/graphics/host_gpu/renderer/cache/bufferCache.cpp(2138,3): error: use of undeclared identifier 'LocalVulkanRecording'
+FAILED: CMakeFiles/fiber_migration_tests.dir/src/graphics/host_gpu/renderer/commandScheduler.cpp.obj 
+src/graphics/host_gpu/renderer/commandScheduler.cpp(60,46): error: use of undeclared identifier 'DeviceFault'
+
+## Link (ninja -k 0, depois das correções de compilação)
+vulkan_recording_tests.exe: lld-link: error: undefined symbol: unsigned int __cdecl LocalPlatform::ThreadId(void)
+    >>> referenced by src/local/vulkan-recording.cpp
+vulkan_recording_tests.exe: lld-link: error: undefined symbol: void __cdecl LocalPlatform::SetThreadName(char const *)
+    >>> referenced by src/local/vulkan-recording.cpp
+vulkan_recording_tests.exe: lld-link: error: undefined symbol: void __cdecl LocalPlatform::PinThreadToCpuList(char const *)
+    >>> referenced by src/local/vulkan-recording.cpp
+page_manager_tests.exe: lld-link: error: undefined symbol: bool __cdecl Libs::LibKernel::Memory::RestoreGuestWritable(unsigned __int64, unsigned __int64)
+    >>> referenced by src/graphics/host_gpu/pageManager.cpp
+memory_tracker_tests.exe: lld-link: error: undefined symbol: kyty_local_async_reprotect_mode
+    >>> referenced by tests/MemoryTrackerTests.cpp
+memory_tracker_tests.exe: lld-link: error: undefined symbol: kyty_local_range_set_fast_mode
+    >>> referenced by tests/MemoryTrackerTests.cpp
+memory_tracker_tests.exe: lld-link: error: undefined symbol: bool __cdecl Libs::LibKernel::Memory::RestoreGuestWritable(unsigned __int64, unsigned __int64)
+    >>> referenced by src/graphics/host_gpu/pageManager.cpp
+event_queue_lifetime_tests.exe: lld-link: error: undefined symbol: unsigned int __cdecl LocalPlatform::ThreadId(void)
+    >>> referenced by src/kernel/eventQueue.cpp
+audio_out2_port_tests.exe: lld-link: error: undefined symbol: unsigned __int64 __cdecl Libs::Audio::AudioInternal::AudioOutQueuedMicros(int)
+    >>> referenced by src/libs/libAudio2.cpp
+kernel_file_system_tests.exe: lld-link: error: undefined symbol: main
+    >>> referenced by D:\a\_work\1\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl:78
+    >>> referenced by D:\a\_work\1\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl:288
