@@ -18,7 +18,7 @@ seguinte, na mesma pasta.
 |---|---|
 | CPU | AMD Ryzen 7 5700X, 8 núcleos / 16 threads (Zen 3), sem P/E-cores |
 | GPU | NVIDIA GeForce RTX 3060 Ti, 8 GB (heap device-local 8024 MiB; budget Vulkan 6349 MiB) |
-| Driver NVIDIA | 610.88 (o usuário vai atualizar antes da pré-compilação; o relatório completo trará a versão final) |
+| Driver NVIDIA | 617.42 (atualizado depois do build; build e ctest rodaram com o 610.88) |
 | RAM | 32 GB: 4 × 8 GB DDR4 Kingston de kits diferentes, a 2933 MT/s |
 | Placa-mãe / BIOS | Gigabyte B450M DS3H V2, BIOS F67d |
 | Windows | Windows 11 Pro 25H2, build 26200.9711 |
@@ -147,7 +147,7 @@ O ambiente de build funciona: emulador e pré-compilador compilam com o toolchai
 ## Pendente para completar o 001
 
 1. Copiar o dump para `F:\Games\PPSA01341-app0` e ler `sce_sys/param.json` (versão).
-2. Atualização do driver NVIDIA (o usuário faz).
+2. ~~Atualização do driver NVIDIA~~ feita: 617.42.
 3. `.\precompile-windows.ps1`: tempo total.
 4. `.\run-windows.ps1 -Game <dump>`: confirmar a entrada no jogo.
 5. Save de benchmark em Boletaria 1-1 (`F:\dev\bench-save` em vez de `C:\dev\bench-save`, por espaço em disco no C:).
