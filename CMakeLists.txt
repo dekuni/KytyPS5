@@ -642,12 +642,15 @@ add_executable(event_queue_lifetime_tests EXCLUDE_FROM_ALL
 	"${KYTY_TESTS_DIR}/EventQueueLifetimeTests.cpp"
 	"${KYTY_SOURCE_DIR}/kernel/eventQueue.cpp"
 	"${KYTY_SOURCE_DIR}/loader/timer.cpp"
+	"${KYTY_SOURCE_DIR}/local/local-platform.cpp"
 )
 target_link_libraries(event_queue_lifetime_tests common fmt::fmt)
 target_include_directories(event_queue_lifetime_tests PRIVATE ${inc_headers})
 
 add_kyty_full_emulator_test(kernel_file_system_tests
 	"${KYTY_TESTS_DIR}/KernelFileSystemTests.cpp")
+# The test includes SDL.h, which on Windows renames main to SDL_main (SDL2main is not linked).
+set_source_files_properties("${KYTY_TESTS_DIR}/KernelFileSystemTests.cpp" PROPERTIES COMPILE_DEFINITIONS SDL_MAIN_HANDLED)
 add_executable(save_data_capacity_tests EXCLUDE_FROM_ALL
 	"${KYTY_TESTS_DIR}/SaveDataCapacityTests.cpp")
 target_include_directories(save_data_capacity_tests PRIVATE ${inc_headers})
@@ -953,7 +956,7 @@ if((LINUX OR WIN32) AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 		DEPENDS "${recording_generator}" "${vulkan_registry}" "${vulkan_hpp}"
 		VERBATIM)
 	foreach(recording_target kyty_emulator kyty_shader_precompile shader_recompiler_compute_tests shader_cfg_tests xpr_replay_tests
-			virtual_memory_allocation_tests)
+			virtual_memory_allocation_tests kernel_file_system_tests fiber_migration_tests)
 		target_sources(${recording_target} PRIVATE
 			"${KYTY_SOURCE_DIR}/local/vulkan-recording.cpp" "${recording_generated}")
 		target_include_directories(${recording_target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
@@ -961,12 +964,14 @@ if((LINUX OR WIN32) AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 	endforeach()
 	add_executable(vulkan_recording_tests EXCLUDE_FROM_ALL
 		"${KYTY_TESTS_DIR}/VulkanRecordingTests.cpp"
-		"${KYTY_SOURCE_DIR}/local/vulkan-recording.cpp" "${recording_generated}")
+		"${KYTY_SOURCE_DIR}/local/vulkan-recording.cpp" "${recording_generated}"
+		"${KYTY_SOURCE_DIR}/local/local-platform.cpp")
 	target_include_directories(vulkan_recording_tests PRIVATE ${inc_headers} "${CMAKE_CURRENT_BINARY_DIR}")
 	target_link_libraries(vulkan_recording_tests PRIVATE Threads::Threads Vulkan::Headers)
 
 	foreach(native_resource_target kyty_emulator kyty_shader_precompile shader_recompiler_compute_tests shader_cfg_tests
-			resource_tracking_tests resource_materialization_tests virtual_memory_allocation_tests)
+			resource_tracking_tests resource_materialization_tests virtual_memory_allocation_tests kernel_file_system_tests
+			fiber_migration_tests)
 		target_sources(${native_resource_target} PRIVATE "${lod_stats_pack_header}")
 		target_compile_definitions(${native_resource_target} PRIVATE KYTY_LOCAL_NATIVE_RESOURCES=1)
 		target_link_libraries(${native_resource_target} ${CMAKE_DL_LIBS})

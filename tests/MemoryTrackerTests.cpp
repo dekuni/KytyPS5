@@ -29,6 +29,14 @@
 #include <unistd.h>
 #endif
 
+// The emulator defines these switches in bufferCache.cpp and the kernel's memory map in memory.cpp, neither linked
+// here (lld-link keeps the references that GNU ld drops): the switches at their defaults, no guest address space.
+volatile std::atomic<uint32_t> kyty_local_range_set_fast_mode {0};
+volatile std::atomic<uint32_t> kyty_local_async_reprotect_mode {0};
+namespace Libs::LibKernel::Memory {
+bool RestoreGuestWritable(uint64_t /*vaddr*/, uint64_t /*size*/) { return false; }
+} // namespace Libs::LibKernel::Memory
+
 namespace {
 
 using Libs::Graphics::GuestRange;

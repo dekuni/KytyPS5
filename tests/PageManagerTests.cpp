@@ -23,6 +23,12 @@
 #include <unistd.h>
 #endif
 
+// pageManager.cpp hands an unwatched page back to the guest through the kernel's memory map, which this test
+// does not link (lld-link keeps the reference that GNU ld drops): with no guest address space it returns false.
+namespace Libs::LibKernel::Memory {
+bool RestoreGuestWritable(uint64_t /*vaddr*/, uint64_t /*size*/) { return false; }
+} // namespace Libs::LibKernel::Memory
+
 namespace {
 
 using Libs::Graphics::PageManager;

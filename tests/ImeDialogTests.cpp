@@ -4,7 +4,16 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <utility>
+
+// imeDialog.cpp keeps dialog input beside an input tape (controller.cpp), which this test does not link:
+// no tape is recorded or replayed here.
+namespace Libs::Controller {
+std::string RecordingTapePath() { return {}; }
+std::string ReplayTapePath() { return {}; }
+void NoteMarker(const char* /*kind*/) {}
+} // namespace Libs::Controller
 
 namespace Ime = Libs::Dialog::ImeDialog;
 

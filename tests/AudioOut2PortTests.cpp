@@ -369,6 +369,11 @@ uint32_t AudioOutOutputs(const OutputParam* /*params*/, uint32_t /*num*/, bool b
 	return 0;
 }
 
+// (audio.cpp's: no audio device queues anything here.)
+uint64_t AudioOutQueuedMicros(int /*handle*/) {
+	return 0;
+}
+
 } // namespace Libs::Audio::AudioInternal
 
 namespace Libs::LibKernel {
