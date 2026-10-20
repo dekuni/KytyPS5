@@ -105,6 +105,40 @@ int main() {
 		Check(Locate(outside, m.image, true, &shift) != Found::AtOffset,
 		      "original code expected past the end of the module is not a match");
 	}
+	{
+		// A cheat made of a 0xCC padding run (a code cave it fills) and three 1-byte edits, like the 1.07 HUD
+		// mod: at its offset it applies; elsewhere its padding run is no evidence of where the code went.
+		Module m;
+		std::fill(m.bytes.begin() + 0x300, m.bytes.begin() + 0x309, 0xcc);
+		std::fill(m.bytes.begin() + 0x500, m.bytes.begin() + 0x509, 0xcc); // another padding run
+		const auto cave = m.At(0x300, 9);
+		const auto a = m.At(0x314, 1), b = m.At(0x328, 1), c = m.At(0x33c, 1);
+		std::vector<Write> here {Line(0x300, cave), Line(0x314, a), Line(0x328, b), Line(0x33c, c)};
+		Check(Locate(here, m.image, true, &shift) == Found::AtOffset && shift == 0,
+		      "a padding-anchored cheat applies at its offset on its own version");
+		std::vector<Write> moved {Line(0x2c0, cave), Line(0x2d4, a), Line(0x2e8, b), Line(0x2fc, c)};
+		Check(Locate(moved, m.image, true, &shift) == Found::TooShort,
+		      "a padding run and 3 code bytes are not searched for (its run is in every build)");
+		std::vector<Write> other {Line(0x300, cave), Line(0x314, a), Line(0x328, b), Line(0x33c, c)};
+		Check(Locate(other, m.image, false, &shift) == Found::AtOffset,
+		      "on another version, at its offset, the padding still counts as checked bytes");
+		Check(IsFiller(std::vector<uint8_t>(4, 0x90)) && IsFiller(std::vector<uint8_t>(4, 0)) &&
+		          !IsFiller({0xcc, 0x90}) && !IsFiller({0x48, 0x48}),
+		      "filler is one repeated 0x00, 0xCC or 0x90");
+	}
+	{
+		// Real code moved, with a padding cave next to it: the code anchors, the cave is still checked.
+		Module m;
+		std::fill(m.bytes.begin() + 0x400, m.bytes.begin() + 0x410, 0xcc);
+		const auto code = m.At(0x3e0, 8), cave = m.At(0x400, 16);
+		std::vector<Write> writes {Line(0x3a0, code), Line(0x3c0, cave)};
+		Check(Locate(writes, m.image, false, &shift) == Found::Moved && shift == 0x40 &&
+		          writes[1].target_address == m.image.base + 0x400,
+		      "real code anchors a moved cheat; its padding cave is checked where it lands");
+		m.bytes[0x405] = 0x00;
+		std::vector<Write> used {Line(0x3a0, code), Line(0x3c0, cave)};
+		Check(Locate(used, m.image, false, &shift) == Found::NotFound, "a cave that no longer matches is not placed");
+	}
 	if (failures == 0) std::printf("GamePatchLocateTests: ok\n");
 	return failures == 0 ? 0 : 1;
 }

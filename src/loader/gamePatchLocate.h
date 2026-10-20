@@ -67,17 +67,38 @@ inline size_t CheckedBytes(const std::vector<Write>& writes) {
 	return bytes;
 }
 
+// Original bytes that are one repeated padding value (0x00, int3 0xCC, nop 0x90): a code cave or the space
+// between functions. Every build has runs of them, so they place nothing when searched for.
+inline bool IsFiller(const std::vector<uint8_t>& bytes) {
+	if (bytes.empty()) return true;
+	const uint8_t value = bytes.front();
+	return (value == 0x00 || value == 0xcc || value == 0x90) &&
+	       std::all_of(bytes.begin(), bytes.end(), [value](uint8_t byte) { return byte == value; });
+}
+
+// The original bytes a search can trust: those of the writes that are not filler.
+inline size_t SearchedBytes(const std::vector<Write>& writes) {
+	size_t bytes = 0;
+	for (const auto& write: writes) {
+		if (!IsFiller(write.off)) bytes += write.off.size();
+	}
+	return bytes;
+}
+
 inline Found Locate(std::vector<Write>& writes, const Image& image, bool same_version, int64_t* shift) {
 	const size_t checked = CheckedBytes(writes);
 	if ((same_version || checked >= kMinSearchedBytes) && Place(writes, image, 0)) {
 		*shift = 0;
 		return Found::AtOffset;
 	}
-	if (checked < kMinSearchedBytes) {
+	// Searching, a cheat must bring enough real code: a filler write (a 0xCC cave, say) still has to match
+	// where the cheat lands (Place), but neither counts nor anchors the search, or a few 1-byte edits beside
+	// a padding run would be placed wherever another build has such a run.
+	if (SearchedBytes(writes) < kMinSearchedBytes) {
 		return Found::TooShort;
 	}
 	const auto anchor = std::max_element(writes.begin(), writes.end(), [](const Write& a, const Write& b) {
-		return (IsZero(a.off) ? 0 : a.off.size()) < (IsZero(b.off) ? 0 : b.off.size());
+		return (IsFiller(a.off) ? 0 : a.off.size()) < (IsFiller(b.off) ? 0 : b.off.size());
 	});
 	std::vector<int64_t> shifts;
 	for (const auto& segment: image.segments) {

@@ -4,8 +4,11 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLocale>
 #include <QRegularExpression>
 
@@ -28,6 +31,16 @@ QString QuoteArgument(const QString& argument) {
 
 QString FormatGb(double bytes) {
 	return QLocale(QLocale::English).toString(bytes / (1024.0 * 1024.0 * 1024.0), 'f', 0);
+}
+
+// The build a game code patch file is for: "<id> <version>" (run-windows.ps1 reads it the same way), empty when the
+// file is missing or unreadable.
+QString PatchBuild(const QString& file) {
+	QFile json(file);
+	if (!json.open(QIODevice::ReadOnly)) return QString();
+	const QJsonObject object = QJsonDocument::fromJson(json.readAll()).object();
+	const QString     id = object.value(QStringLiteral("id")).toString(), version = object.value(QStringLiteral("version")).toString();
+	return id.isEmpty() || version.isEmpty() ? QString() : QStringLiteral("%1 %2").arg(id, version);
 }
 
 } // namespace
@@ -58,6 +71,7 @@ QStringList LaunchPlan::dryRunLines() const {
 		game_line += QStringLiteral(" (untested: the emulator supports %1)").arg(GameInfo::testedVersions().join(QStringLiteral(" and ")));
 	}
 	lines << game_line;
+	if (!outputNote.isEmpty()) lines << QStringLiteral("output:   %1").arg(outputNote);
 	lines << QStringLiteral("config:   %1").arg(Native(configPath));
 	QString affinity = QStringLiteral("affinity: 0x%1 (%2 CPUs)").arg(QString::number(mask, 16).toUpper()).arg(cpus);
 	if (!environment.value(QStringLiteral("KYTY_RENDER_CPUS")).isEmpty()) {
@@ -227,9 +241,24 @@ LaunchPlan LaunchPlan::build(const LaunchInputs& in) {
 			patch   = QStringLiteral("patches\\1080p-fast.json");
 		}
 		if (is_demons_souls && !convars.isEmpty()) {
-			env.set(QStringLiteral("KYTY_RENDER_CONVARS"), convars);
-			const QString file = Native(QDir(package.root).filePath(QDir::fromNativeSeparators(patch)));
-			if (QFileInfo::exists(file)) set_option(QStringLiteral("--game-patch"), file);
+			const QString file      = Native(QDir(package.root).filePath(QDir::fromNativeSeparators(patch)));
+			const QString patch_for = PatchBuild(file);
+			// The HUD patches are one build's: on another the emulator would stop at boot (the file's title is checked)
+			// and the game's 1080p tier would lay its HUD out off screen. There 1080f renders the 3D at 1080 lines with
+			// the 4K output and 1080q is the 4K output (run-windows.ps1 does the same).
+			if (patch_for.compare(plan.version, Qt::CaseInsensitive) == 0) {
+				env.set(QStringLiteral("KYTY_RENDER_CONVARS"), convars);
+				set_option(QStringLiteral("--game-patch"), file);
+			} else {
+				plan.outputNote = QStringLiteral("%1's HUD patch is for %2, the game is %3:")
+				                      .arg(output, patch_for.isEmpty() ? QStringLiteral("another build") : patch_for, plan.version);
+				if (output == QStringLiteral("1080f")) {
+					env.set(QStringLiteral("KYTY_RENDER_HEIGHT"), QStringLiteral("1080"));
+					plan.outputNote += QStringLiteral(" 4K output, 3D at 1080 lines (-RenderHeight 1080)");
+				} else {
+					plan.outputNote += QStringLiteral(" 4K output (the same 1440p scene)");
+				}
+			}
 		}
 	}
 	// -Upscaler fsr4: FSR 4 instead of the game's TAA. DLSS (the launcher's own: run-windows.ps1 takes taa or fsr4) is

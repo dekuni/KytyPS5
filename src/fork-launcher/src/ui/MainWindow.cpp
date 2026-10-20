@@ -414,11 +414,15 @@ bool MainWindow::preflight() {
 			return false;
 		}
 	}
+	// The 1080p HUD patches are PPSA01341 1.07's (patches\1080p-*.json); on another build LaunchPlan plays the 4K output
+	// instead, 1080p Performance with its 3D at 1080 lines.
 	if ((s.output == QStringLiteral("1080q") || s.output == QStringLiteral("1080f")) && m_game.paramRead &&
-	    m_game.contentVersion != QStringLiteral("01.007.000")) {
-		if (MessageDialog::ask(this, Tone::Warn, tr("The 1080p modes are made for version 1.07"),
-		                       tr("With %1 the HUD may have the wrong size. If it looks wrong, choose 4K (PS5) in Settings.").arg(m_game.displayVersion()),
-		                       {tr("Cancel"), tr("Play anyway")}) != 1) {
+	    m_game.versionKey().compare(QStringLiteral("PPSA01341 01.007.000"), Qt::CaseInsensitive) != 0) {
+		if (MessageDialog::ask(this, Tone::Warn, tr("The 1080p modes are made for PPSA01341 1.07"),
+		                       tr("With %1 %2 the game uses the 4K (PS5) output: 1080p Performance renders its 3D at 1080 lines, "
+		                          "1080p Quality is the same as 4K (PS5).")
+		                           .arg(m_game.titleId, m_game.displayVersion()),
+		                       {tr("Cancel"), tr("Play")}) != 1) {
 			return false;
 		}
 	}
@@ -599,9 +603,11 @@ void MainWindow::onSettingChanged(const QString& key, const QString& previous) {
 		m_store.save();
 		m_settings->reload();
 	} else if (key == QStringLiteral("output") && s.output != QStringLiteral("4k") && m_game.paramRead &&
-	           m_game.contentVersion != QStringLiteral("01.007.000")) {
-		MessageDialog::tell(this, Tone::Warn, tr("The 1080p modes are made for version 1.07"),
-		                    tr("Your game is %1: its HUD may have the wrong size in this mode. If it looks wrong, choose 4K (PS5).").arg(m_game.displayVersion()));
+	           m_game.versionKey().compare(QStringLiteral("PPSA01341 01.007.000"), Qt::CaseInsensitive) != 0) {
+		MessageDialog::tell(this, Tone::Warn, tr("The 1080p modes are made for PPSA01341 1.07"),
+		                    tr("Your game is %1 %2: it uses the 4K (PS5) output instead. 1080p Performance renders its 3D at 1080 "
+		                       "lines (as 3D resolution 1080p), 1080p Quality is the same as 4K (PS5).")
+		                        .arg(m_game.titleId, m_game.displayVersion()));
 	}
 	refreshHome();
 }

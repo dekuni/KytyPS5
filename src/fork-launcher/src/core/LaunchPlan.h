@@ -47,6 +47,7 @@ struct LaunchPlan {
 	QString            titleName;
 	QString            version; // "PPSA01341 01.007.000" or "unknown"
 	bool               tested = false;
+	QString            outputNote; // why a 1080p output is the 4K one on this build ("output:" line), or empty
 
 	QString logDir;
 	QString stamp; // yyyyMMdd-HHmmss-fff: the logs <stamp>.out.log and <stamp>.err.log

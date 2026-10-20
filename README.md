@@ -33,7 +33,7 @@ first launch, performance tips and troubleshooting.
 
 | Game | Title ID | Versions |
 | --- | --- | --- |
-| Demon's Souls | PPSA01341 | 1.07 (01.007.000): tested with this fork. 1.05 (01.005.000): supported by chen's branch; this fork's additions were tested on 1.07 only (the lighting rule matches 1.07's shaders and does not apply to 1.05; the 1080p modes are untested there). Update to 1.07 if you can. |
+| Demon's Souls | PPSA01341 | 1.07 (01.007.000): tested with this fork. 1.05 (01.005.000): supported by chen's branch; this fork's additions were tested on 1.07 only (the lighting rule matches 1.07's shaders and does not apply to 1.05; the 1080p modes' HUD patches are PPSA01341 1.07's, so on any other build 1080p Performance plays the 4K output with its 3D at 1080 lines and 1080p Quality plays 4K). Update to 1.07 if you can. |
 | Demon's Souls (US) | PPSA01342 | Same game patches and settings; untested. |
 
 The launcher reads the game's version and warns when it is not one of these.

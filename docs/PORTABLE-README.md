@@ -38,7 +38,8 @@ After that, start the launcher and click Play. It remembers your settings.
 - Game: Demon's Souls, title ID PPSA01341 (content ID EP9000-PPSA01341_00-DEMONSSOULS00000).
 - Version 1.07 (01.007.000): tested with this fork.
 - Version 1.05 (01.005.000): supported by chen's branch; this fork's additions were tested on 1.07 only. The
-  faster lighting rule matches 1.07's shaders and does not apply to 1.05, and the 1080p modes are untested there.
+  faster lighting rule matches 1.07's shaders and does not apply to 1.05, and the 1080p modes' HUD patches
+  are 1.07's (see Output below).
   Update to 1.07 if you can.
 - The US release (PPSA01342) gets the same game patches and settings; it is untested.
 
@@ -103,7 +104,9 @@ How large the game draws its 3D scene and what size picture it sends to your scr
   softer.
 
 The two 1080p modes rely on small patches to the game's code, applied when it starts and located by the
-game's original bytes; they keep the HUD at its normal size. They are made for version 1.07.
+game's original bytes; they keep the HUD at its normal size. They are made for PPSA01341 1.07: with any
+other build (1.05, another region) the 4K output is played instead, 1080p Performance with its 3D at 1080
+lines (as 3D resolution 1080p) and 1080p Quality as 4K (PS5); the log's "output:" line says so.
 
 ### 3D resolution (4K output only)
 

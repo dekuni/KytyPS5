@@ -351,12 +351,31 @@ $outputs = @{
 	'1080q' = @{ Convars = 'r_Wants4K=WantsPerf'; Patch = 'patches\1080p-quality.json' }
 	'1080f' = @{ Convars = 'r_Wants4K=WantsBase'; Patch = 'patches\1080p-fast.json' }
 }
+$outputNote = ''
 if ($Output) {
 	if (!$outputs.Contains($Output)) { throw "-Output takes 4k, 1080q or 1080f, not '$Output'" }
 	if ($titleId -match '^PPSA0134[0-2]$' -and $outputs[$Output].Convars) {
-		$environment['KYTY_RENDER_CONVARS'] = $outputs[$Output].Convars
 		$file = Join-Path $PSScriptRoot $outputs[$Output].Patch
-		if (!$Patch -and (Test-Path $file)) { Set-Option '--game-patch' $file }
+		# The HUD patches are one build's ("id" and "version" in the file): on another build they cannot be placed, the
+		# emulator would stop at boot (the file's title is checked) and the game's 1080p tier would lay its HUD out off
+		# screen. There 1080f renders the 3D at 1080 lines with the 4K output (-RenderHeight 1080, unless one is given)
+		# and 1080q is the 4K output (its 1440p scene).
+		$patchFor = ''
+		if (Test-Path $file) { $patchJson = Get-Content $file -Raw | ConvertFrom-Json; $patchFor = "$($patchJson.id) $($patchJson.version)" }
+		if ($Patch -or $patchFor -eq $version) {
+			$environment['KYTY_RENDER_CONVARS'] = $outputs[$Output].Convars
+			if (!$Patch -and (Test-Path $file)) { Set-Option '--game-patch' $file }
+		} else {
+			$outputNote = "$Output's HUD patch is for $(if ($patchFor) { $patchFor } else { 'another build' }), the game is ${version}:"
+			if ($Output -eq '1080f' -and $RenderHeight -le 0) {
+				$environment['KYTY_RENDER_HEIGHT'] = '1080'
+				$outputNote += ' 4K output, 3D at 1080 lines (-RenderHeight 1080)'
+			} elseif ($Output -eq '1080f') {
+				$outputNote += " 4K output, 3D at $RenderHeight lines (-RenderHeight)"
+			} else {
+				$outputNote += ' 4K output (the same 1440p scene)'
+			}
+		}
 	}
 }
 # -Upscaler fsr4: FSR 4 (an experimental source-v07 build, its model files in deps\fsr4) instead of the game's TAA, at
@@ -476,6 +495,7 @@ $quoted = @('--game', "`"$Game`"") + ($options | ForEach-Object { if ($_ -match 
 $logDir = if (Test-Path "$PSScriptRoot\_Build") { "$PSScriptRoot\_Build\run-logs" } else { "$PSScriptRoot\logs" }
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
 Write-Host "game:     $(if ($titleName) { "$titleName, " })$version$(if (!$tested) { " (untested: the emulator is tested with $($testedVersions -join ' and '))" })"
+if ($outputNote) { Write-Host "output:   $outputNote" }
 Write-Host "config:   $Config$(if ($Baseline) { ' (baseline: no switches)' })$(if ($Precompile) { ' (precompile)' })"
 Write-Host ("affinity: 0x{0:X} ({1} CPUs){2}" -f $mask, $cpus, $(if ($environment['KYTY_RENDER_CPUS']) { "; render threads on CPUs $($environment['KYTY_RENDER_CPUS'])" }))
 Write-Host "switches: $($environment.Count)"
