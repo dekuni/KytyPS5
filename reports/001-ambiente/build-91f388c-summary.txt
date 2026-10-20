@@ -1,0 +1,6 @@
+Branch fix/run-windows-brace, HEAD 91f388c2ff0593e550804fb40b706b0f82778a0e (= 987dd7c + '}' em run-windows.ps1), working tree limpo
+run-windows.ps1: 0 erros de parse (Windows PowerShell 5.1 Parser::ParseFile)
+build-windows.cmd                         exit 0, 00:00:45.57
+build-windows.cmd kyty_shader_precompile  exit 0, 00:00:35.32
+SHA-256 kyty_emulator.exe          AB101BEE40C5B918D27B208E394381A89BBF06A492F46C444B7C81642CD33245
+SHA-256 kyty_shader_precompile.exe 21DD7B5FBF7A819A032FF81B73EDA8A618CDB02921C37BD5D5AA58C398D1F56C

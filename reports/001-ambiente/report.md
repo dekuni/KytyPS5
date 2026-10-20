@@ -2,7 +2,8 @@
 
 **Status: PARCIAL.** Cobre instalação, build, testes, versão do jogo (PPSA01342 01.005.000), build de
 `fix/bench-save-region`, RAM e pré-compilação (seção "Complemento"). Ainda faltam a entrada no jogo e o save de
-benchmark, num commit seguinte, na mesma pasta. **Bloqueado:** `run-windows.ps1` tem erro de sintaxe (ver "Problemas vistos").
+benchmark, num commit seguinte, na mesma pasta. O erro de sintaxe do `run-windows.ps1` foi corrigido em
+`fix/run-windows-brace` (`91f388c`). Entrada no jogo e primeira sessão: ver "Complemento". Falta só o save de benchmark.
 
 - Data/hora: 2026-10-19, 20:01–20:41 (horário local do PC)
 - Branch e commit testados: `fix/windows-test-build` `f225a627efe635f05ba6bc6d1e5dc7cd12ef915f`
@@ -214,12 +215,69 @@ O ambiente de build funciona: emulador e pré-compilador compilam com o toolchai
 - CPU durante a pré-compilação (LibreHardwareMonitor 0.9.6, amostras entre 22:28 e 22:54): Tctl 78–80 °C, package
   cerca de 78 W, clock médio 4,1–4,6 GHz.
 
+### Entrada no jogo e primeira sessão (diagnóstico, **não é benchmark**)
+
+- Branch `fix/run-windows-brace` `91f388c2ff0593e550804fb40b706b0f82778a0e` (= `987dd7c` + a `}` do `run-windows.ps1`),
+  working tree limpo, `run-windows.ps1`: 0 erros de parse. Build: emulador 45,6 s, pré-compilador 35,3 s, exit 0.
+  `kyty_emulator.exe` SHA-256 `AB101BEE40C5B918D27B208E394381A89BBF06A492F46C444B7C81642CD33245`,
+  `kyty_shader_precompile.exe` `21DD7B5FBF7A819A032FF81B73EDA8A618CDB02921C37BD5D5AA58C398D1F56C`.
+- `powershell -ExecutionPolicy Bypass -File .\run-windows.ps1 -Game F:\PPSA01342-app`, sem switches extras: 2560×1440
+  em janela, `--vblank-frequency 60 --present-mode Immediate`, 57 switches de `run-windows.json`. O launcher avisa
+  "PPSA01342 01.005.000 (untested: the emulator is tested with PPSA01341 01.007.000 and PPSA01341 01.005.000)".
+  Configuração do jogo: a padrão (não mexi nas opções). **Monitor a 164 Hz** (não a 60 Hz) nesta sessão.
+- **Chegou ao jogo:** sessão das 23:09:17 às 23:34:39 (25 min 23 s), tutorial jogado até o primeiro boss, fechado
+  normalmente (exit 0). Sem crash: 0 linhas com fatal, exception, crash, device lost ou assert; `.err.log` vazio.
+  Save criado em `_SaveData\PPSA01342` (perfil do jogador de 13.602 bytes, última gravação 23:34:17).
+- Primeira abertura: "Preparing shaders" traduziu os 20.374 programas
+  (`Shader prefetch: all 20374 programs done … (0 rejected), 5001 MiB of SPIR-V`) às 23:11:16, cerca de 2 min após
+  abrir. A pré-compilação estática foi aproveitada (`Static pipeline binaries: 45735 pipelines … 3831 MiB (5 ms)`), mas
+  o cache local do driver começou vazio (`Vulkan pipeline cache: initialized empty`).
+- Avisos: 1 `warning: executing wave64 compute shader cs=0x00000002088a6600`; 2× `AJM ATRAC9: … undecodable frame(s)
+  concealed` (last error `0x82000000` e `0x82100006`).
+
+**Por que o jogo travava.** O emulador registra cada quadro que levou mais de 100 ms (`SLOW Frame`, com hora e o tempo
+dividido em `idle` = render thread ociosa esperando o jogo, `cpu` = CPU da render thread, `compile` = espera por
+compilação de pipeline, e esperas de GPU e transferência; ver `src/local/live-control.h:100-159`). Quadros entre 17 e
+100 ms não são registrados, então **não há fps médio nem 1% low desta sessão**: só as travadas.
+
+- 219 quadros acima de 100 ms (mediana 148 ms, p90 486 ms, pior 12.953 ms), somando 77,5 s travados em 25 min.
+- Causa dominante (≥ 50% do quadro):
+
+  | Causa | Quadros | Tempo total | Pior |
+  |---|---:|---:|---:|
+  | compilação de pipeline (`compile`) | 75 | 47,3 s | 12.953 ms |
+  | render thread ociosa (`idle`, esperando o jogo) | 109 | 21,0 s | 1.648 ms |
+  | misto (nenhuma causa ≥ 50%) | 26 | 7,5 s | 3.680 ms |
+  | `readback_wait` / `download_wait` / `upload_wait` / `gpu_wait` | 9 | 1,7 s | 572 ms |
+
+- **A compilação de pipeline explica cerca de 61% do tempo travado** e todas as travadas longas: 12,9 s às 23:24:28,
+  7,1 s às 23:25:01 e 4,8 s às 23:14:02 (`compile` = 12.854, 7.050 e 3.952 ms). O emulador registrou 814 compilações
+  lentas: `AsyncCompute` 277 (mediana 308 ms, máx. 16.790 ms), `AsyncGraphics` 394 (185 / 860 ms), `CreateCompute` 81
+  (305 / 4.385 ms) e `CreateGraphics` 62 (170 / 768 ms). São pipelines que não estavam no cache do driver.
+  Como `KYTY_DRIVER_CACHE_KEY` é fixo, a próxima sessão deve reaproveitá-los. **Não medido** ainda.
+- Os 58 quadros do minuto 23:34 (11,9 s, quase todos `idle`) são o fechamento do jogo.
+- **CPU (LibreHardwareMonitor, 1.521 amostras de 1 s):** Tctl médio 70,4 °C, máx. 78,9 °C (nenhuma amostra ≥ 85 °C),
+  clock médio 4.429 MHz, carga média 26%, package médio 60 W. **A CPU não foi limitada por temperatura.**
+- **GPU:** carga média 70% (85–90% nos minutos de jogo), core médio 76,9 °C / máx. 85 °C, **hot spot médio 97,6 °C,
+  máx. 108,2 °C** (delta hot spot–core médio 20,7 °C, máx. 30,3 °C), 183 s com hot spot ≥ 105 °C. Com carga ≥ 80%:
+  hot spot < 95 °C → clock médio 1.974 MHz (14 amostras); 100–105 °C → 1.749 MHz (746); ≥ 105 °C → 1.769 MHz (165),
+  potência 138–139 W. Com isso não dá para separar queda de boost por temperatura de outras causas, mas a GPU passou
+  quase todo o jogo a 100+ °C de hot spot e cerca de 200 MHz abaixo do clock que tinha fria.
+- **Memória de vídeo (8 GB):** 37 amostras do emulador; o uso passou do budget em 7 (máx. 8.250 MiB de 7.054 MiB às
+  23:34:05, no fechamento). O tipo "plain" em VRAM chegou a 3.065 MiB (23:22–23:23). LHM: "GPU Memory Used" médio
+  6.415 MiB, máx. 7.810 MiB. Placa no limite; não há linha de log que ligue isso a uma travada específica.
+
+**Resumo:** as quedas foram dominadas por compilação de pipeline na primeira execução (cache do driver vazio). Em
+segundo lugar vêm quadros em que a render thread esperava o jogo. Temperatura da CPU não foi fator. A GPU ficou quente
+(hot spot 100–108 °C) e perto do limite de VRAM, o que vale olhar nas medições. Tabela por minuto e os 10 piores quadros
+em `session-analysis.md`.
+
 ## Pendente para completar o 001
 
 1. ~~Dump e versão~~ feito: `F:\PPSA01342-app`, 01.005.000.
 2. ~~Atualização do driver NVIDIA~~ feita: 617.42.
 3. ~~Pré-compilação~~ feita (ver "Pré-compilação" no Complemento).
-4. `.\run-windows.ps1 -Game <dump>`: confirmar a entrada no jogo.
+4. ~~Entrada no jogo~~ feita em `91f388c` (tutorial até o primeiro boss; ver "Complemento").
 5. Save de benchmark em Boletaria 1-1 (`F:\dev\bench-save` em vez de `C:\dev\bench-save`, por espaço em disco no C:).
 
 ## Arquivos anexos
@@ -232,3 +290,7 @@ O ambiente de build funciona: emulador e pré-compilador compilam com o toolchai
 - `precompile.log`: saída do `precompile-windows.ps1` (seeds, hints, progresso, mensagem final).
 - `precompile-plan-seeds.log`: planejamento das seeds, com os 5 programas rejeitados.
 - `run-first.log`: saída da tentativa de abrir o jogo (erro de sintaxe do `run-windows.ps1`).
+- `build-91f388c-summary.txt`: build de `fix/run-windows-brace`.
+- `session-analysis.md`: saída completa da análise da primeira sessão (por minuto, VRAM, 10 piores quadros).
+- `session_analysis.py`: o script que gerou essa análise (log do emulador + CSVs do LibreHardwareMonitor).
+- `session-emulator.out.log.gz`: log completo do emulador da sessão (gzip).
