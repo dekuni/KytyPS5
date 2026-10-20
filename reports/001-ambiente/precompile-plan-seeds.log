@@ -1,0 +1,204 @@
+Vulkan compute wave64: emulated on 32-lane subgroups (default, device 0x10de:0x2486)
+Vulkan subgroups: 32 lanes by default, 32-32, required sizes for stages 0x3fff
+Video memory: largest device-local heap 8024 MiB, budget 6349 MiB: treated as small (textures may leave video memory past half the budget)
+Video memory (start): 3 MiB in use of 7256 MiB (VMA device-local 0 MiB, plain type 0 MiB in video memory, driver 3 MiB); GPU system memory 15 MiB (plain type 0 MiB, host-visible 0 MiB)
+Vulkan pipeline cache: loading _PipelineCache\PPSA01342.bin
+Vulkan pipeline cache: loaded 36 bytes from _PipelineCache\PPSA01342.bin
+Vulkan pipeline cache: loading _PipelineCache\PPSA01342.table.bin
+Vulkan pipeline cache: loaded 36 bytes from _PipelineCache\PPSA01342.table.bin
+Shader seeds: 20382 programs and 55382 graphics pipelines from F:\dev\KytyPS5\_Build\static-precompile\seeds-PPSA01342_01.005.000.seeds (shard 0/1)
+Shader seeds: compiled 1000 programs, 1989 ms
+Shader seeds: compiled 2000 programs, 5480 ms
+Shader seeds: compiled 3000 programs, 11068 ms
+Shader seeds: compiled 4000 programs, 15705 ms
+Shader seeds: compiled 5000 programs, 20784 ms
+Shader seeds: compiled 6000 programs, 24051 ms
+Shader seeds: compiled 7000 programs, 27907 ms
+Shader seeds: compiled 8000 programs, 32347 ms
+Shader seeds: compiled 9000 programs, 36201 ms
+Shader seeds: compiled 10000 programs, 39627 ms
+Shader seeds: compiled 11000 programs, 43679 ms
+Shader seeds: compiled 12000 programs, 49309 ms
+Shader seeds: compiled 13000 programs, 53606 ms
+Shader seeds: compiled 14000 programs, 58748 ms
+Shader seeds: compiled 15000 programs, 64302 ms
+Shader seeds: compiled 16000 programs, 67876 ms
+PS_WAVE_OR 28d564ce9ac6681a lane 31
+PS_WAVE_OR 28d564ce9ac6681a lane 63
+PS_WAVE_OR 28d564ce9ac6681a lane 31
+PS_WAVE_OR 28d564ce9ac6681a lane 63
+PS_WAVE_OR 28d564ce9ac6681a lane 31
+PS_WAVE_OR 28d564ce9ac6681a lane 63
+Shader seeds: compiled 17000 programs, 69341 ms
+PS_WAVE_OR 508639e60adf3173 lane 31
+PS_WAVE_OR 508639e60adf3173 lane 63
+PS_WAVE_OR 7cda4aa236db94e0 lane 31
+PS_WAVE_OR 7cda4aa236db94e0 lane 63
+PS_WAVE_OR 508639e60adf3173 lane 31
+PS_WAVE_OR 508639e60adf3173 lane 63
+PS_WAVE_OR 508639e60adf3173 lane 31
+PS_WAVE_OR 508639e60adf3173 lane 63
+PS_WAVE_OR 7cda4aa236db94e0 lane 31
+PS_WAVE_OR 7cda4aa236db94e0 lane 63
+PS_WAVE_OR 7cda4aa236db94e0 lane 31
+PS_WAVE_OR 7cda4aa236db94e0 lane 63
+Shader seeds: compiled 18000 programs, 69758 ms
+PS_WAVE_OR 36d996831cdfe22c lane 31
+PS_WAVE_OR 36d996831cdfe22c lane 63
+PS_WAVE_OR 36d996831cdfe22c lane 31
+PS_WAVE_OR 36d996831cdfe22c lane 63
+PS_WAVE_OR 36d996831cdfe22c lane 31
+PS_WAVE_OR 36d996831cdfe22c lane 63
+PS_WAVE_OR 261fb99e38565157 lane 31
+PS_WAVE_OR 261fb99e38565157 lane 63
+PS_WAVE_OR 261fb99e38565157 lane 31
+PS_WAVE_OR 261fb99e38565157 lane 63
+PS_WAVE_OR 261fb99e38565157 lane 31
+PS_WAVE_OR 261fb99e38565157 lane 63
+PS_WAVE_OR 261fb99e38565157 lane 31
+PS_WAVE_OR 261fb99e38565157 lane 63
+PS_WAVE_OR 07baff5f01f696cf lane 31
+PS_WAVE_OR 07baff5f01f696cf lane 63
+PS_WAVE_OR 07baff5f01f696cf lane 31
+PS_WAVE_OR 07baff5f01f696cf lane 63
+PS_WAVE_OR 07baff5f01f696cf lane 31
+PS_WAVE_OR 07baff5f01f696cf lane 63
+PS_WAVE_OR 07baff5f01f696cf lane 31
+PS_WAVE_OR 07baff5f01f696cf lane 63
+PS_WAVE_OR fd0468d363318ee2 lane 31
+PS_WAVE_OR fd0468d363318ee2 lane 63
+PS_WAVE_OR fd0468d363318ee2 lane 31
+PS_WAVE_OR fd0468d363318ee2 lane 63
+PS_WAVE_OR fd0468d363318ee2 lane 31
+PS_WAVE_OR fd0468d363318ee2 lane 63
+PS_WAVE_OR d9706eaa87525ba9 lane 31
+PS_WAVE_OR d9706eaa87525ba9 lane 63
+PS_WAVE_OR d9706eaa87525ba9 lane 31
+PS_WAVE_OR d9706eaa87525ba9 lane 63
+PS_WAVE_OR d9706eaa87525ba9 lane 31
+PS_WAVE_OR d9706eaa87525ba9 lane 63
+PS_WAVE_OR d9706eaa87525ba9 lane 31
+PS_WAVE_OR d9706eaa87525ba9 lane 63
+PS_WAVE_OR 21731e55ad9204b2 lane 31
+PS_WAVE_OR 21731e55ad9204b2 lane 63
+PS_WAVE_OR 21731e55ad9204b2 lane 31
+PS_WAVE_OR 21731e55ad9204b2 lane 63
+PS_WAVE_OR 21731e55ad9204b2 lane 31
+PS_WAVE_OR 21731e55ad9204b2 lane 63
+PS_WAVE_OR 21731e55ad9204b2 lane 31
+PS_WAVE_OR 21731e55ad9204b2 lane 63
+PS_WAVE_OR d6f1ca48d4cb17ac lane 31
+PS_WAVE_OR d6f1ca48d4cb17ac lane 63
+Shader seeds: compiled 19000 programs, 70115 ms
+Shader seeds: compiled 20000 programs, 70529 ms
+Shader seeds: compiled 21000 programs, 71074 ms
+Shader seeds: compiled 22000 programs, 71712 ms
+Shader seeds: compiled 23000 programs, 72013 ms
+Shader seeds: compiled 24000 programs, 72349 ms
+Shader seeds: compiled 25000 programs, 72576 ms
+Shader seeds: compiled 26000 programs, 72856 ms
+Shader seeds: compiled 27000 programs, 73195 ms
+Shader seeds: compiled 28000 programs, 73567 ms
+Shader seeds: 64 exact and 55 table modules (0 with portable buffers), 22 table vertex modules
+Shader seeds: created 1000 pipelines, 73966 ms
+Shader seeds: created 2000 pipelines, 73967 ms
+Shader seeds: created 3000 pipelines, 73967 ms
+Shader seeds: created 4000 pipelines, 73968 ms
+Shader seeds: created 5000 pipelines, 73968 ms
+Shader seeds: created 6000 pipelines, 73969 ms
+Shader seeds: created 7000 pipelines, 73969 ms
+Shader seeds: created 8000 pipelines, 73970 ms
+Shader seeds: created 9000 pipelines, 73971 ms
+Shader seeds: created 10000 pipelines, 73971 ms
+Shader seeds: created 11000 pipelines, 73972 ms
+Shader seeds: created 12000 pipelines, 73972 ms
+Shader seeds: created 13000 pipelines, 73973 ms
+Shader seeds: created 14000 pipelines, 73974 ms
+Shader seeds: created 15000 pipelines, 73974 ms
+Shader seeds: created 16000 pipelines, 73975 ms
+Shader seeds: created 17000 pipelines, 73975 ms
+Shader seeds: created 18000 pipelines, 73976 ms
+Shader seeds: created 19000 pipelines, 73977 ms
+Shader seeds: created 20000 pipelines, 73977 ms
+Shader seeds: created 21000 pipelines, 73978 ms
+Shader seeds: created 22000 pipelines, 73978 ms
+Shader seeds: created 23000 pipelines, 73979 ms
+Shader seeds: created 24000 pipelines, 73979 ms
+Shader seeds: created 25000 pipelines, 73980 ms
+Shader seeds: created 26000 pipelines, 73980 ms
+Shader seeds: created 27000 pipelines, 73982 ms
+Shader seeds: created 28000 pipelines, 73982 ms
+Shader seeds: created 29000 pipelines, 73983 ms
+Shader seeds: created 30000 pipelines, 73983 ms
+Shader seeds: created 31000 pipelines, 73984 ms
+Shader seeds: created 32000 pipelines, 73985 ms
+Shader seeds: created 33000 pipelines, 73985 ms
+Shader seeds: created 34000 pipelines, 73986 ms
+Shader seeds: created 35000 pipelines, 73986 ms
+Shader seeds: created 36000 pipelines, 73987 ms
+Shader seeds: created 37000 pipelines, 73988 ms
+Shader seeds: created 38000 pipelines, 73988 ms
+Shader seeds: created 39000 pipelines, 73989 ms
+Shader seeds: created 40000 pipelines, 73990 ms
+Shader seeds: created 41000 pipelines, 73990 ms
+Shader seeds: created 42000 pipelines, 73991 ms
+Shader seeds: created 43000 pipelines, 73991 ms
+Shader seeds: created 44000 pipelines, 73992 ms
+Shader seeds: created 45000 pipelines, 73993 ms
+Shader seeds: created 46000 pipelines, 73993 ms
+Shader seeds: created 47000 pipelines, 73994 ms
+Shader seeds: created 48000 pipelines, 73995 ms
+Shader seeds: created 49000 pipelines, 73995 ms
+Shader seeds: created 50000 pipelines, 73996 ms
+Shader seeds: created 51000 pipelines, 73996 ms
+Shader seeds: created 52000 pipelines, 73997 ms
+Shader seeds: created 53000 pipelines, 73998 ms
+Shader seeds: created 54000 pipelines, 73998 ms
+Shader seeds: created 55000 pipelines, 73999 ms
+Shader seeds: created 56000 pipelines, 74000 ms
+Shader seeds: created 57000 pipelines, 74000 ms
+Shader seeds: created 58000 pipelines, 74001 ms
+Shader seeds: created 59000 pipelines, 74002 ms
+Shader seeds: created 60000 pipelines, 74002 ms
+Shader seeds: created 61000 pipelines, 74003 ms
+Shader seeds: created 62000 pipelines, 74004 ms
+Shader seeds: created 63000 pipelines, 74004 ms
+Shader seeds: created 64000 pipelines, 74005 ms
+Shader seeds: created 65000 pipelines, 74006 ms
+Shader seeds: created 66000 pipelines, 74007 ms
+Shader seeds: created 67000 pipelines, 74007 ms
+Shader seeds: created 68000 pipelines, 74008 ms
+Shader seeds: created 69000 pipelines, 74009 ms
+Shader seeds: created 70000 pipelines, 74009 ms
+Shader seeds: created 71000 pipelines, 74010 ms
+Shader seeds: created 72000 pipelines, 74011 ms
+Shader seeds: created 73000 pipelines, 74011 ms
+Shader seeds: created 74000 pipelines, 74012 ms
+Shader seeds: created 75000 pipelines, 74013 ms
+Shader seeds: created 76000 pipelines, 74016 ms
+Shader seeds: created 78000 pipelines, 74016 ms
+Shader seeds: created 77000 pipelines, 74016 ms
+Shader seeds: created 79000 pipelines, 74017 ms
+Shader seeds: created 80000 pipelines, 74017 ms
+Shader seeds: created 81000 pipelines, 74018 ms
+Shader seeds: created 82000 pipelines, 74018 ms
+Shader seeds: created 83000 pipelines, 74018 ms
+Shader seeds: created 84000 pipelines, 74019 ms
+Shader seeds: created 85000 pipelines, 74019 ms
+Shader seeds: created 86000 pipelines, 74020 ms
+Shader seeds: created 87000 pipelines, 74020 ms
+Shader seeds: created 88000 pipelines, 74020 ms
+Shader seeds: created 89000 pipelines, 74021 ms
+Shader seeds: created 90000 pipelines, 74021 ms
+Shader seeds: plan saved to F:\dev\KytyPS5\_Build\run-logs\20261019-220128-precompile\plan.bin (80568 pipelines, 64494 of them this seed file's)
+Shader seeds: 28483 programs (86 with indirect image tables, 4502 MiB of SPIR-V) in 73907 ms; 90561 pipelines in 121 ms (16 threads; 0 made by another work item, 0 skipped: recorded play's programs, planned; no native variants)
+Shader seeds: rejected 4: shader binding layout failed: image 0 has an invalid binding class in F:/dev/KytyPS5/src/graphics/shader/recompiler/ir/passes/BindingLayout.cpp:408
+Shader seeds: rejected 1: shader resource tracking: hash=0x0733bcf0f4626e8e stage=pixel pc=0x000002d0 GetBufferResource dword 0 is not a valid runtime value: Phi merges 2 unequal values: [0] ReadConst slot=20 [1] GetUserData s0 in F:/dev/KytyPS5/src/graphics/shader/recompiler/ir/passes/ResourceTracking.cpp:173
+Shader seeds: rejected 1: shader resource tracking: hash=0x5f5e2c82effa58bc stage=pixel pc=0x000002d0 GetBufferResource dword 0 is not a valid runtime value: Phi merges 2 unequal values: [0] ReadConst slot=20 [1] GetUserData s0 in F:/dev/KytyPS5/src/graphics/shader/recompiler/ir/passes/ResourceTracking.cpp:173
+Shader seeds: rejected 1: shader resource tracking: hash=0xd099f38c77a6a6fe stage=pixel pc=0x000002d0 GetBufferResource dword 0 is not a valid runtime value: Phi merges 2 unequal values: [0] ReadConst slot=20 [1] GetUserData s0 in F:/dev/KytyPS5/src/graphics/shader/recompiler/ir/passes/ResourceTracking.cpp:173
+Shader seeds: rejected 1: shader resource tracking: hash=0xf80b86032a7cb3d6 stage=pixel pc=0x000002d0 GetBufferResource dword 0 is not a valid runtime value: Phi merges 2 unequal values: [0] ReadConst slot=20 [1] GetUserData s0 in F:/dev/KytyPS5/src/graphics/shader/recompiler/ir/passes/ResourceTracking.cpp:173
+Shader seeds: wrote _PipelineCache\static\PPSA01342_01.005.000.shaders (28483 inputs, 89049 pipelines)
+Pipelines compiled unoptimized first: 0, replaced by their optimized build: 0
+Shader plans: 0 out of memory at the end, 0 brought back by the render thread, 0 beside it (0 of those used)
+Made where first needed: 0 programs translated (0 ms), 0 pipelines (0 ms)
+Shader precompile: complete

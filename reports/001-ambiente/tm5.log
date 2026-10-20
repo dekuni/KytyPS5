@@ -1,0 +1,11 @@
+﻿
+-------- TestMem5 0.13.1 2026-10-19 21:53 --------
+00:00:00  Configuration: 1usmus v3 @ 1usmus
+00:00:00  Testing 1056 MB x 16 (51%) out of 32690 MB
+00:02:15  Testing stopped by user
+
+-------- TestMem5 0.13.1 2026-10-19 21:55 --------
+00:00:00  Configuration: 1usmus v3 @ 1usmus
+00:00:04  WARNING! AWE is not available.
+00:00:04  Testing 1152 MB x 16 (56%) out of 32690 MB
+00:03:40  Testing stopped by user

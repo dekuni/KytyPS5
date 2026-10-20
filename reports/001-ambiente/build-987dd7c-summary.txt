@@ -1,0 +1,8 @@
+Branch fix/bench-save-region, HEAD 987dd7c460af7c89f800af9450c723ac1a027511, working tree limpo (git status --porcelain --untracked-files=no vazio)
+build-windows.cmd                         exit 0, 00:00:56.76 (relink; 3 warnings -Wreturn-type, 0 erros)
+build-windows.cmd kyty_shader_precompile  exit 0, 00:00:59.96
+SHA-256 kyty_emulator.exe          BF834938C2F6724F953EAB581B677C5146346C6C9DAA29DD709AA04B664D1253
+SHA-256 kyty_shader_precompile.exe 78A0E07737E98AE646315FB27493ADFADAB02E063242235855C485E12BBF146C
+Jogo F:\PPSA01342-app: sce_sys\param.json contentVersion "01.005.000"; gameversion.txt +BuildVersion=2024-10-13.856931
+Hints em tools/local/static-precompile: so hints-PPSA01341_01.005.000.hints e hints-PPSA01341_01.007.000.hints (nenhum PPSA01342)
+Obs: primeira tentativa falhou (caminho relativo do build-windows.cmd), refeita com caminho absoluto.

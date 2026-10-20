@@ -1,8 +1,8 @@
 # 001 — ambiente
 
-**Status: PARCIAL.** Cobre instalação, build e testes. Ainda faltam (o dump do jogo não está no PC): versão do jogo,
-tempo da pré-compilação de shaders, entrada no jogo e save de benchmark. Este relatório será completado num commit
-seguinte, na mesma pasta.
+**Status: PARCIAL.** Cobre instalação, build, testes, versão do jogo (PPSA01342 01.005.000), build de
+`fix/bench-save-region`, RAM e pré-compilação (seção "Complemento"). Ainda faltam a entrada no jogo e o save de
+benchmark, num commit seguinte, na mesma pasta.
 
 - Data/hora: 2026-10-19, 20:01–20:41 (horário local do PC)
 - Branch e commit testados: `fix/windows-test-build` `f225a627efe635f05ba6bc6d1e5dc7cd12ef915f`
@@ -19,14 +19,14 @@ seguinte, na mesma pasta.
 | CPU | AMD Ryzen 7 5700X, 8 núcleos / 16 threads (Zen 3), sem P/E-cores |
 | GPU | NVIDIA GeForce RTX 3060 Ti, 8 GB (heap device-local 8024 MiB; budget Vulkan 6349 MiB) |
 | Driver NVIDIA | 617.42 (atualizado depois do build; build e ctest rodaram com o 610.88) |
-| RAM | 32 GB: 4 × 8 GB DDR4 Kingston de kits diferentes, a 2933 MT/s |
+| RAM | 32 GB: 4 × 8 GB DDR4 Kingston de kits diferentes, rated 2666, a **2933 MT/s** (estabilidade não testada, ver "Complemento") |
 | Placa-mãe / BIOS | Gigabyte B450M DS3H V2, BIOS F67d |
 | Windows | Windows 11 Pro 25H2, build 26200.9711 |
 | Memória virtual | Gerenciado pelo sistema (`C:\pagefile.sys`, 2 GB alocados agora) |
 | Plano de energia | Equilibrado |
 | Disco | Repositório e build em F: (NVMe WD WDS480G2G0C, NTFS, mesmo SSD do C:). O dump também vai para F: |
 | Monitor | 2560×1440 a **164 Hz** agora; será posto a 60 Hz antes das medições (BENCHMARKING.md) |
-| Versão do jogo | pendente (dump ainda não copiado) |
+| Versão do jogo | **PPSA01342 (EUA) 01.005.000**, em `F:\PPSA01342-app` (ver "Complemento") |
 
 ## Ferramentas
 
@@ -144,11 +144,62 @@ O ambiente de build funciona: emulador e pré-compilador compilam com o toolchai
   `build-windows.cmd` pelo caminho relativo (corrigido com caminho absoluto). O log completo do primeiro build foi
   sobrescrito por engano; os tempos e códigos de saída daquela rodada foram anotados antes.
 
+## Complemento (2026-10-19, 21:40–, horário local)
+
+### Jogo
+
+- Dump: `F:\PPSA01342-app` (tem `eboot.bin` e `sce_sys`). **PPSA01342 = versão americana**, não a PPSA01341 dos testes
+  do fork.
+- `sce_sys\param.json`: `"contentVersion": "01.005.000"`. `gameversion.txt`: `+BuildVersion=2024-10-13.856931`.
+- **Não é a 1.07 (01.007.000).** Os modos 1080p e a regra de iluminação do fork foram feitos para a 1.07.
+  `src/graphics/host_gpu/renderer/demonsSouls.h:13` cita "PPSA01342 01.005.000" entre as versões vistas.
+- `tools/local/static-precompile/` só tem hints de PPSA01341 (`hints-PPSA01341_01.005.000.hints`,
+  `hints-PPSA01341_01.007.000.hints`). Nenhum de PPSA01342.
+
+### Build de `fix/bench-save-region`
+
+- Commit `987dd7c460af7c89f800af9450c723ac1a027511`, working tree limpo. O `bench-windows.py` desse commit tem
+  `TITLES = ('PPSA01340', 'PPSA01341', 'PPSA01342')`.
+- `build-windows.cmd`: exit 0, 56,8 s (relink: o commit só muda um `.py`). `build-windows.cmd kyty_shader_precompile`:
+  exit 0, 60,0 s. 3 warnings `-Wreturn-type` (`bufferCache.h:86`, `pipelineCache.cpp:97`), 0 erros.
+- `kyty_emulator.exe`: SHA-256 `BF834938C2F6724F953EAB581B677C5146346C6C9DAA29DD709AA04B664D1253`
+- `kyty_shader_precompile.exe`: SHA-256 `78A0E07737E98AE646315FB27493ADFADAB02E063242235855C485E12BBF146C`
+- De novo a primeira chamada falhou por caminho relativo do `build-windows.cmd` (erro meu); refeita com caminho absoluto.
+
+### RAM
+
+- **Velocidade usada em todas as medições: 2933 MT/s (rated 2666). Estabilidade não testada.**
+- TestMem5 0.13.1 (CoolCmd, `TestMem5.7z` SHA-256 `05ffb5bbaa0c2243bf25664049c7aa3615a77bd5036497ef845fc8ed50128c12`),
+  config `1usmus v3 @ 1usmus`. Duas rodadas, ambas paradas pelo usuário antes do fim do primeiro ciclo, 0 erros:
+  51% da RAM por 2min15s e 56% (1152 MB × 16) por 3min40s. Dentro do Windows ele não passou de 56%
+  ("WARNING! AWE is not available": sem o privilégio "Bloquear páginas na memória"). O usuário decidiu pular o teste.
+- Se aparecerem crashes ou glitches aleatórios, a RAM a 2933 é suspeita até prova em contrário.
+
+### Pré-compilação
+
+- `powershell -ExecutionPolicy Bypass -File .\precompile-windows.ps1 -Game F:\PPSA01342-app`, modo padrão (nem
+  `-Quick` nem `-Full`), exe `78A0E077…146C`, sem nada pesado em paralelo.
+- Início 22:00:20, fim 22:59:14: **58 min 55 s** no total (o script mede 00:57:35 depois de gerar as seeds). Exit 0.
+- Mensagem final: `done in 00:57:35: F:\dev\KytyPS5\_PipelineCache\static\PPSA01342_01.005.000.binaries (3.838 MB; 0 shards split)`.
+  O arquivo `.binaries` tem 4.024.416.066 bytes e o `.shaders` 225.637.396 bytes.
+- Sem seeds de PPSA01342, o script gerou `seeds-PPSA01342_01.005.000.seeds`: 20.382 programas (10.692 compute, 2.427
+  vertex, 7.263 pixel) e 55.382 pipelines gráficos, em 67 s.
+- Sem hints de PPSA01342, usou `hints-PPSA01341_01.005.000.hints`: 6.997 programas e 6.991 pipelines, com "0 programs,
+  0 pipelines" sem código no seed. Ou seja, os hints da PPSA01341 1.05 bateram inteiros com o dump americano 1.05.
+  "ready to play" saiu em 00:12:27.
+- 582 shards (70 dos hints + 512 das seeds), 6 por vez, 0 divididos, todos os `.err.log` vazios.
+- **5 programas rejeitados no planejamento** (`plan-seeds.out.log`), dos 28.483:
+  - 4: `shader binding layout failed: image 0 has an invalid binding class` (`BindingLayout.cpp:408`)
+  - 1: `shader resource tracking: hash=0x0733bcf0f4626e8e stage=pixel pc=0x000002d0 GetBufferResource dword 0 is not
+    a valid runtime value: Phi merges 2 unequal values: [0] ReadConst slot=20 [1] GetUserData s0` (`ResourceTracking.cpp:173`)
+- CPU durante a pré-compilação (LibreHardwareMonitor 0.9.6, amostras entre 22:28 e 22:54): Tctl 78–80 °C, package
+  cerca de 78 W, clock médio 4,1–4,6 GHz.
+
 ## Pendente para completar o 001
 
-1. Copiar o dump para `F:\Games\PPSA01341-app0` e ler `sce_sys/param.json` (versão).
+1. ~~Dump e versão~~ feito: `F:\PPSA01342-app`, 01.005.000.
 2. ~~Atualização do driver NVIDIA~~ feita: 617.42.
-3. `.\precompile-windows.ps1`: tempo total.
+3. ~~Pré-compilação~~ feita (ver "Pré-compilação" no Complemento).
 4. `.\run-windows.ps1 -Game <dump>`: confirmar a entrada no jogo.
 5. Save de benchmark em Boletaria 1-1 (`F:\dev\bench-save` em vez de `C:\dev\bench-save`, por espaço em disco no C:).
 
@@ -157,3 +208,7 @@ O ambiente de build funciona: emulador e pré-compilador compilam com o toolchai
 - `ctest.log`: saída completa do ctest.
 - `build-errors-before-fix.txt`: erros de compilação e link do `kyty_tests` em dc29634.
 - `build-summary.txt`: commits, estado do working tree, tempos e SHA-256 dos builds.
+- `build-987dd7c-summary.txt`: build de `fix/bench-save-region`, SHA-256 e versão do jogo.
+- `tm5.log`: log do TestMem5 (as duas rodadas interrompidas).
+- `precompile.log`: saída do `precompile-windows.ps1` (seeds, hints, progresso, mensagem final).
+- `precompile-plan-seeds.log`: planejamento das seeds, com os 5 programas rejeitados.
