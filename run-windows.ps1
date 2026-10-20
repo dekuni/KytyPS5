@@ -370,6 +370,7 @@ if ($Upscaler) {
 if ($FsrFrameGen) {
 	$environment['KYTY_FRAMEGEN_FSR'] = '1'
 	if (!$environment.Contains('KYTY_VRAM_RESERVE_MB')) { $environment['KYTY_VRAM_RESERVE_MB'] = '512' }
+}
 # -TextureReduce 0|1|2: large block-compressed textures held without their 1 or 2 largest levels (KYTY_TEXTURE_REDUCE;
 # without it the emulator takes 1 below 12 GB of video memory, else 0). A simulated 8 GB card at Boletaria 1-1: textures
 # 4.1 -> 2.8 GiB, 1% low 37-49 -> 53-58 fps; close surfaces a little softer.
