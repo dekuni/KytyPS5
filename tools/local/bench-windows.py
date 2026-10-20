@@ -8,7 +8,8 @@
 
 The user's save is only ever moved (renamed), never deleted; `restore` refuses to run while an
 emulator process exists and checks every file's SHA-256 against the backup manifest.
-KYTY_BENCH_BASELINE=<dir> (with PPSA01341 and .kyty-capacity): another baseline for prepare/reset,
+KYTY_BENCH_BASELINE=<dir> (with the title's save folder, PPSA01340, PPSA01341 or PPSA01342, and
+.kyty-capacity): another baseline for prepare/reset,
 such as a copy of a save elsewhere in the game.
 """
 import hashlib
@@ -25,7 +26,9 @@ SAVES = ROOT / '_SaveData'
 BASELINE = Path(os.environ.get('KYTY_BENCH_BASELINE') or ROOT / '_Build/walk-fps-20260914/save-baseline')
 STATE = ROOT / '_Build/windows-bench'
 LIVE_FILE = STATE / 'live-commands.txt'
-ENTRIES = ('PPSA01341', '.kyty-capacity')
+# Every region's Demon's Souls keeps its saves under its own title ID (libSaveData.cpp: _SaveData/<TITLE_ID>).
+TITLES = ('PPSA01340', 'PPSA01341', 'PPSA01342')
+ENTRIES = TITLES + ('.kyty-capacity',)
 
 
 def digest(root):
@@ -49,6 +52,8 @@ def prepare():
     active = STATE / 'active.json'
     if active.exists():
         sys.exit(f'a baseline save is already installed ({active}); run restore first')
+    if not any((BASELINE / title).is_dir() for title in TITLES):
+        sys.exit(f'{BASELINE} has no save folder of {", ".join(TITLES)}')
     stamp = time.strftime('%Y%m%d-%H%M%S')
     backup = STATE / f'user-save-{stamp}'
     backup.mkdir(parents=True)
@@ -61,7 +66,7 @@ def prepare():
     for name in ENTRIES:
         if (BASELINE / name).exists():
             shutil.copytree(BASELINE / name, SAVES / name)
-    manifest['baseline'] = digest(SAVES / 'PPSA01341')
+    manifest['baseline'] = {title: digest(SAVES / title) for title in TITLES if (SAVES / title).is_dir()}
     active.write_text(json.dumps(manifest, indent=1))
     print(f'user save moved to {backup}; baseline save installed')
 
