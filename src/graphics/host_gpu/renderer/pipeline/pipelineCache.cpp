@@ -2732,10 +2732,12 @@ struct PipelineCache::PendingGraphicsPipeline {
 // Vulkan recording layer only intercepts the render thread's own calls).
 class PipelineCache::CompileWorkers {
 public:
-	// background: below-normal priority off the render CPUs, and jobs still queued at shutdown are dropped.
-	explicit CompileWorkers(uint32_t count, bool background = false): m_background(background) {
+	// background: below-normal priority off the render CPUs, and jobs still queued at shutdown are dropped. name: the
+	// threads' name (threads.ps1 and profilers tell the pools apart by it).
+	explicit CompileWorkers(uint32_t count, bool background = false, const char* name = "Kyty.Compile"): m_background(background) {
 		for (uint32_t i = 0; i < count; i++)
-			m_threads.emplace_back([this] {
+			m_threads.emplace_back([this, name] {
+				LocalPlatform::SetThreadName(name);
 				if (m_background) LocalPlatform::MakeBackgroundThread(std::getenv("KYTY_RENDER_CPUS"));
 				Run();
 			});
@@ -2793,14 +2795,16 @@ PipelineCache::CompileWorkers& PipelineCache::Workers() {
 PipelineCache::CompileWorkers& PipelineCache::TableWorkers() {
 	if (m_table_workers == nullptr) {
 		// As many as the shader prefetch's (background threads: they take no time the game's threads want).
-		m_table_workers = std::make_unique<CompileWorkers>(std::max(2u, std::thread::hardware_concurrency() / 2u), true);
+		m_table_workers = std::make_unique<CompileWorkers>(std::max(2u, std::thread::hardware_concurrency() / 2u), true,
+		                                                   "Kyty.TableCompile");
 	}
 	return *m_table_workers;
 }
 
 PipelineCache::CompileWorkers& PipelineCache::OptimizeWorkers() {
 	if (m_optimize_workers == nullptr) {
-		m_optimize_workers = std::make_unique<CompileWorkers>(std::max(2u, std::thread::hardware_concurrency() / 4u), true);
+		m_optimize_workers = std::make_unique<CompileWorkers>(std::max(2u, std::thread::hardware_concurrency() / 4u), true,
+		                                                      "Kyty.Optimize");
 	}
 	return *m_optimize_workers;
 }
