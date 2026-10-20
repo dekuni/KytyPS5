@@ -731,6 +731,7 @@ if(BUILD_TESTING)
 	add_test(NAME memory_tracker COMMAND $<TARGET_FILE:memory_tracker_tests>)
 	add_test(NAME page_manager COMMAND $<TARGET_FILE:page_manager_tests>)
 	add_test(NAME archive_file COMMAND $<TARGET_FILE:archive_file_tests>)
+	add_test(NAME game_patch_locate COMMAND $<TARGET_FILE:game_patch_locate_tests>)
 	add_test(NAME demons_souls_copy COMMAND $<TARGET_FILE:demons_souls_copy_tests>)
 	add_test(NAME demons_souls_idle COMMAND $<TARGET_FILE:demons_souls_idle_tests>)
 	add_test(NAME page_protection_table COMMAND $<TARGET_FILE:page_protection_table_tests>)
@@ -808,6 +809,7 @@ if(BUILD_TESTING)
 		memory_tracker_tests
 		page_manager_tests
 		archive_file_tests
+		game_patch_locate_tests
 		demons_souls_copy_tests
 		demons_souls_idle_tests
 		page_protection_table_tests
