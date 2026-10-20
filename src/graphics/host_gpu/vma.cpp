@@ -2,6 +2,8 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -384,11 +386,26 @@ void GraphicContext::TrimImagePool() {
 	if (allocator != nullptr) DestroyImagePool(allocator);
 }
 
-// Out of video memory: the first few times say so in the log, with the heaps' budgets.
+// Out of video memory: the first few times say so in the log, with the heaps' budgets; after them at most once a second,
+// with how many times and how much it happened so far (an 8 GB card at a boss: 8 lines in one frame, then silence while
+// it went on).
 void GraphicContext::ReportMemoryFallback(const char* what, uint64_t bytes) const {
-	static std::atomic<uint32_t> reported {0};
-	if (reported.fetch_add(1, std::memory_order_relaxed) >= 8) return;
-	std::printf("Vulkan: video memory full, %s (%" PRIu64 " bytes)\n", what, bytes);
+	static std::atomic<uint64_t> reported {0};
+	static std::atomic<uint64_t> reported_bytes {0};
+	static std::atomic<int64_t>  last_summary_ms {0};
+	const uint64_t               count = reported.fetch_add(1, std::memory_order_relaxed) + 1;
+	const uint64_t               total = reported_bytes.fetch_add(bytes, std::memory_order_relaxed) + bytes;
+	if (count > 8) {
+		const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+		                        std::chrono::steady_clock::now().time_since_epoch())
+		                        .count();
+		int64_t last = last_summary_ms.load(std::memory_order_relaxed);
+		if (now - last < 1000 || !last_summary_ms.compare_exchange_strong(last, now, std::memory_order_relaxed)) return;
+		std::printf("Vulkan: video memory full x%" PRIu64 " (%" PRIu64 " MiB in all), last: %s (%" PRIu64 " bytes)\n", count,
+		            total >> 20u, what, bytes);
+	} else {
+		std::printf("Vulkan: video memory full, %s (%" PRIu64 " bytes)\n", what, bytes);
+	}
 	VmaBudget budgets[VK_MAX_MEMORY_HEAPS] {};
 	vmaGetHeapBudgets(allocator, budgets);
 	for (uint32_t i = 0; i < GetPhysicalDeviceMemoryProperties().memoryHeapCount; i++) {
@@ -515,8 +532,14 @@ bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanIm
 			const bool created        = create();
 			VmaAllocationInfo allocated {};
 			if (created) vmaGetAllocationInfo(allocator, image.allocation, &allocated);
-			ReportMemoryFallback(created ? "an image is in system memory" : "an image could not be created",
-			                     allocated.size);
+			// Which image (only render targets, depth and storage images ask for video memory past half the budget).
+			char what[192];
+			std::snprintf(what, sizeof(what), "%s %ux%ux%u, %u layer(s), %u level(s), %s, usage 0x%x",
+			              created ? "an image is in system memory:" : "an image could not be created:",
+			              image_info.extent.width, image_info.extent.height, image_info.extent.depth,
+			              image_info.arrayLayers, image_info.mipLevels, vk::to_string(image_info.format).c_str(),
+			              static_cast<uint32_t>(image_info.usage));
+			ReportMemoryFallback(what, allocated.size);
 			if (!created) return false;
 		}
 	}
