@@ -9,8 +9,9 @@
 The user's save is only ever moved (renamed), never deleted; `restore` refuses to run while an
 emulator process exists and checks every file's SHA-256 against the backup manifest.
 KYTY_BENCH_BASELINE=<dir> (with the title's save folder, PPSA01340, PPSA01341 or PPSA01342, and
-.kyty-capacity): another baseline for prepare/reset,
-such as a copy of a save elsewhere in the game.
+.kyty-capacity): another baseline for prepare, such as a copy of a save elsewhere in the game. prepare
+requires the folder of the game run-windows.ps1 starts (game-path.txt) and remembers the baseline: every
+reset reinstalls that one and fails when the game's save folder did not come back.
 """
 import hashlib
 import json
@@ -46,14 +47,31 @@ def emulator_running():
     return 'kyty_emulator.exe' in out
 
 
+def game_title():
+    """The title ID of the game run-windows.ps1 starts (game-path.txt, its sce_sys/param.json), or None
+    (no game-path.txt, a .zar archive, an unreadable param.json)."""
+    try:
+        game = Path((ROOT / 'game-path.txt').read_text(encoding='utf-8-sig').strip())
+        return json.loads((game / 'sce_sys' / 'param.json').read_text(encoding='utf-8-sig'))['titleId']
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def prepare():
     if emulator_running():
         sys.exit('an emulator process is running; close it first')
     active = STATE / 'active.json'
     if active.exists():
         sys.exit(f'a baseline save is already installed ({active}); run restore first')
-    if not any((BASELINE / title).is_dir() for title in TITLES):
-        sys.exit(f'{BASELINE} has no save folder of {", ".join(TITLES)}')
+    # The game reads only its own title's folder: a baseline of another region would leave it without a
+    # save (it would start a new game and every run would end with no HUD).
+    title = game_title()
+    needed = (title,) if title in TITLES else TITLES
+    if not any((BASELINE / name).is_dir() for name in needed):
+        sys.exit(f'{BASELINE} has no save folder of {", ".join(needed)}'
+                 + (f' (the game in game-path.txt is {title})' if title else ''))
+    if title not in TITLES:
+        print(f'the game is {title or "unknown (game-path.txt)"}: the baseline\'s save folders are installed as they are')
     stamp = time.strftime('%Y%m%d-%H%M%S')
     backup = STATE / f'user-save-{stamp}'
     backup.mkdir(parents=True)
@@ -66,25 +84,36 @@ def prepare():
     for name in ENTRIES:
         if (BASELINE / name).exists():
             shutil.copytree(BASELINE / name, SAVES / name)
-    manifest['baseline'] = {title: digest(SAVES / title) for title in TITLES if (SAVES / title).is_dir()}
+    manifest['baseline'] = {name: digest(SAVES / name) for name in TITLES if (SAVES / name).is_dir()}
+    # reset reinstalls this baseline whatever KYTY_BENCH_BASELINE is in its shell.
+    manifest['baseline_dir'] = str(BASELINE)
+    manifest['title'] = title if title in TITLES else None
     active.write_text(json.dumps(manifest, indent=1))
-    print(f'user save moved to {backup}; baseline save installed')
+    print(f'user save moved to {backup}; baseline save installed from {BASELINE} ({", ".join(manifest["baseline"])})')
 
 
 def reset():
     """Fresh baseline save for the next run (the game autosaves over it while playing)."""
     if emulator_running():
         sys.exit('an emulator process is running; close it first')
-    if not (STATE / 'active.json').exists():
+    active = STATE / 'active.json'
+    if not active.exists():
         sys.exit('no baseline save is installed; run prepare first')
+    manifest = json.loads(active.read_text())
+    # The baseline prepare installed (a manifest of an older prepare has none: the environment's, as before).
+    baseline = Path(manifest.get('baseline_dir') or BASELINE)
+    title = manifest.get('title')
     used = STATE / f'baseline-used-{time.strftime("%Y%m%d-%H%M%S")}'
     used.mkdir(parents=True)
     for name in ENTRIES:
         if (SAVES / name).exists():
             (SAVES / name).rename(used / name)
-        if (BASELINE / name).exists():
-            shutil.copytree(BASELINE / name, SAVES / name)
-    print('baseline save reinstalled')
+        if (baseline / name).exists():
+            shutil.copytree(baseline / name, SAVES / name)
+    installed = [name for name in TITLES if (SAVES / name).is_dir()]
+    if not installed or (title and title not in installed):
+        sys.exit(f'no baseline save of {title or ", ".join(TITLES)} in {baseline}: the game would start without one')
+    print(f'baseline save reinstalled ({", ".join(installed)} from {baseline})')
 
 
 def restore():

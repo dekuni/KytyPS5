@@ -1,6 +1,6 @@
 param([string]$Label = 'prof', [string]$Plan = 'w:down:0,w:up:10000',
       [double]$Seconds = 8, [int]$Top = 60, [string[]]$Focus = @(), [string[]]$Poke = @(),
-      [string]$Live = '', [string[]]$Set = @(), [switch]$KeepRunning)
+      [string]$Live = '', [string[]]$Set = @(), [switch]$KeepRunning, [int]$StartupSeconds = 100)
 # Render-thread profile at one place of the walk route: launch (bench-run.ps1), walk -Plan and
 # stop there, sample the render thread (live `prof`) and symbolize it with profreport.exe against
 # this build's linker map while the process is still alive. Writes _Build/prof/<label>/prof.txt,
@@ -13,6 +13,14 @@ $root = (Resolve-Path "$PSScriptRoot\..\..\..").Path
 Set-Location $root
 $out = "$root\_Build\prof\$Label"
 New-Item -ItemType Directory -Force $out | Out-Null
+# profreport.exe (tools\local\windows\profreport.cpp): build-windows.cmd's profreport target, built here before
+# the game starts when missing (an older _Build\windows-tools copy is used when there is one).
+$profreport = "$root\_Build\windows-tools\profreport.exe"
+if (!(Test-Path $profreport)) { $profreport = "$root\_Build\windows\profreport.exe" }
+if (!(Test-Path $profreport)) {
+	cmd /c "$root\build-windows.cmd" profreport | Select-String -Pattern ' error|FAILED' | Select-Object -Last 5
+	if (!(Test-Path $profreport)) { 'profreport.exe could not be built (build-windows.cmd profreport)'; exit 1 }
+}
 $map = "$root\_Build\windows\kyty_emulator_clang_lld_link.map"
 Copy-Item $map "$out\map.map"
 # prof-hot-lines.py disassembles the build that ran; prof-inline.py symbolizes it with its PDB.
@@ -25,7 +33,8 @@ $pokes = foreach ($item in ($Poke | ForEach-Object { $_ -split ',' } | Where-Obj
 	# The Windows build links at a fixed base (0x140000000); map addresses are relative to it.
 	"poke32 {0:x} $value" -f (0x140000000 + [Convert]::ToUInt64(($entry.Line.Trim() -split '\s+')[0], 16))
 }
-$params = @{ Label = $Label; KeepRunning = $true; NoWalk = $true; ShotOnly = $true }
+# -StartupSeconds: each start-up attempt's limit (bench-run.ps1; a 1-1 save on a 16 GB laptop needs ~180).
+$params = @{ Label = $Label; KeepRunning = $true; NoWalk = $true; ShotOnly = $true; StartupSeconds = $StartupSeconds }
 if ($Set.Count) { $params['Set'] = $Set }
 & "$S\bench-run.ps1" @params | Select-Object -Last 3
 $process = Get-Process kyty_emulator -ErrorAction SilentlyContinue | Where-Object { $_.Threads.Count -gt 1 } | Select-Object -First 1
@@ -44,14 +53,14 @@ if ($Live) { $commands += $Live }
 python tools\local\bench-windows.py live ($commands -join ' ; ') |
 	Select-String 'LIVE_PROF|LIVE_MEASURE|LIVE_POKE|LIVE_ERROR' | ForEach-Object { $_.Line } | Tee-Object -FilePath "$out\live.txt"
 $env:KYTY_MAP = "$out\map.map"
-& "$root\_Build\windows-tools\profreport.exe" $process.Id "$out\prof.bin" $Top | Set-Content "$out\prof.txt" -Encoding utf8
+& $profreport $process.Id "$out\prof.bin" $Top | Set-Content "$out\prof.txt" -Encoding utf8
 "report: $out\prof.txt"
 $env:KYTY_PROF_CHAIN = '4'
 $env:KYTY_PROF_EMU = '1'
 # powershell -File passes a comma list as one string: split it.
 foreach ($text in ($Focus | ForEach-Object { $_ -split ',' } | Where-Object { $_ })) {
 	$name = $text -replace '[^A-Za-z0-9_]', '_'
-	& "$root\_Build\windows-tools\profreport.exe" $process.Id "$out\prof.bin" 5 $text |
+	& $profreport $process.Id "$out\prof.bin" 5 $text |
 		Select-String -Pattern '== focus' -Context 0, 40 | ForEach-Object { $_.Line; $_.Context.PostContext } |
 		Set-Content "$out\prof-$name.txt" -Encoding utf8
 	"focus: $out\prof-$name.txt"

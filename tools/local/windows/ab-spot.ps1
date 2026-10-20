@@ -1,7 +1,7 @@
 param([string]$Label = 'ab', [string]$Plan = 'w:down:0,w:up:10000',
       [string]$Symbol = '', [string]$A = '0', [string]$B = '1',
       [int]$Rounds = 4, [double]$Seconds = 6, [string[]]$Set = @(), [switch]$KeepRunning,
-      [int]$Attempts = 3, [double]$MaxFps = 55)
+      [int]$Attempts = 3, [double]$MaxFps = 55, [int]$StartupSeconds = 100)
 # Same-process A/B at one place of the walk route: launch (bench-run.ps1), walk -Plan and stop
 # there, then switch a 32-bit variable (a kyty_local_* switch, by its linker-map address) between
 # the hex values -A and -B with the live poke32 command, measuring one window per setting in
@@ -18,7 +18,8 @@ $entry = Select-String -Path $map -Pattern "\s$Symbol\s*$" | Select-Object -Firs
 if (!$entry) { "symbol $Symbol not in $map"; exit 1 }
 # The Windows build links at a fixed base (0x140000000); map addresses are relative to it.
 $address = '{0:x}' -f (0x140000000 + [Convert]::ToUInt64(($entry.Line.Trim() -split '\s+')[0], 16))
-$params = @{ Label = $Label; KeepRunning = $true; NoWalk = $true; ShotOnly = $true }
+# -StartupSeconds: each start-up attempt's limit (bench-run.ps1; a 1-1 save on a 16 GB laptop needs ~180).
+$params = @{ Label = $Label; KeepRunning = $true; NoWalk = $true; ShotOnly = $true; StartupSeconds = $StartupSeconds }
 if ($Set.Count) { $params['Set'] = $Set }
 # The walk sometimes ends facing a wall of the tunnel (a light spot at the 60 fps cap): walk again
 # from a fresh start then, up to -Attempts times (-MaxFps 0 keeps the first spot).

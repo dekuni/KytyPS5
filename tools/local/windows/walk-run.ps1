@@ -2,7 +2,7 @@ param([string]$Label = 'walk', [string]$Exe = '', [string[]]$Extra = @(), [int]$
       [string]$TurnKey = 'h', [int]$WalkMs = 25000, [string]$SideKey = '', [int]$SideMs = 0,
       [switch]$KeepRunning, [switch]$Reuse, [switch]$Prof, [switch]$Measure, [int]$TurnAtMs = 0,
       [string]$Plan = '', [int]$Vblank = 0, [string]$ProfThread = '', [switch]$PerSecond, [string[]]$Set = @(), [switch]$Census, [switch]$RenderCensus, [switch]$TraceWrites, [switch]$TraceMarks, [int]$TraceDelayMs = 0, [string]$Patch = '', [switch]$NoPrecompile,
-      [string]$Game = '')
+      [string]$Game = '', [int]$StartupSeconds = 100)
 # -Plan "w:down:0,h:down:5000,h:up:5500,w:up:25000": the whole key sequence from one process
 # (keys.ps1), so the turn lands at the same place every run; it replaces -TurnMs/-SideKey.
 # The user's low-fps route: from the baseline save's spawn, turn the camera a little to the
@@ -27,6 +27,8 @@ if (!$Reuse) {
 	if ($NoPrecompile) { $params['NoPrecompile'] = $true }
 	# -Game <folder>: another game version (bench-run.ps1 -Game).
 	if ($Game) { $params['Game'] = $Game }
+	# -StartupSeconds: each start-up attempt's limit (bench-run.ps1; a 1-1 save on a 16 GB laptop needs ~180).
+	$params['StartupSeconds'] = $StartupSeconds
 	& "$S\bench-run.ps1" @params | Select-Object -Last 3
 }
 if (!(Get-Process kyty_emulator -ErrorAction SilentlyContinue | Where-Object { $_.Threads.Count -gt 1 })) { 'emulator not running'; exit 1 }

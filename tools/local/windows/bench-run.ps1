@@ -218,7 +218,16 @@ $log | Set-Content "$S\bench-states.txt" -Encoding ascii
 if ($state -eq 'hud') { break }
 "no HUD after $StartupSeconds s (attempt $attempt, last state $state, window not in front $($script:unfocused)x; states: $($log -join ' | '))"
 }
-if ($state -ne 'hud') { "no HUD in $StartupAttempts start-ups"; exit 1 }
+if ($state -ne 'hud') {
+	# Closed whatever -KeepRunning says: the callers that go on with a running emulator (prof-spot, ab-spot,
+	# ab-exe, walk-run, pgo-train) would measure, profile or train on a menu or a new game's creation screen.
+	"no HUD in $StartupAttempts start-ups"
+	for ($i = 0; $i -lt 60 -and (Live); $i++) {
+		Live | Stop-Process -Force -ErrorAction SilentlyContinue
+		Start-Sleep 1
+	}
+	exit 1
+}
 "HUD after {0:N0} s ({1})" -f ((Get-Date) - $start).TotalSeconds, ($log -join ' | ')
 Start-Sleep 10
 if (!$NoWalk) { Key w 10000; Start-Sleep 10 }

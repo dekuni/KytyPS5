@@ -39,9 +39,9 @@
 #   .\run-windows.ps1 -Quality low            Demon's Souls draws less (low / lowest: simpler shadows and
 #                                            distant detail): faster where the CPU limits
 #   .\run-windows.ps1 -TextureReduce 1       large textures without their largest level: half the size per side
-#                                            (2: a quarter; 0: whole), less video memory and upload; default 1
-#                                            with less than 12 GB of video memory, else 0 (the launcher's Graphics
-#                                            Low / Lowest pass 1 / 2)
+#                                            (2: a quarter; 0: whole), less video memory and upload; default 0
+#                                            on every card (opt-in; the launcher's Graphics Low / Lowest pass
+#                                            1 / 2)
 #   .\run-windows.ps1 -Game <folder>         the game (the folder with eboot.bin); remembered in
 #                                            game-path.txt, a folder dialog when none is known
 #   .\run-windows.ps1 -Game <file.zar>       the game folder packed into a ZArchive (read without extracting it)
@@ -372,7 +372,7 @@ if ($FsrFrameGen) {
 	if (!$environment.Contains('KYTY_VRAM_RESERVE_MB')) { $environment['KYTY_VRAM_RESERVE_MB'] = '512' }
 }
 # -TextureReduce 0|1|2: large block-compressed textures held without their 1 or 2 largest levels (KYTY_TEXTURE_REDUCE;
-# without it the emulator takes 1 below 12 GB of video memory, else 0). A simulated 8 GB card at Boletaria 1-1: textures
+# without it 0 on every card: opt-in, descriptors.cpp TextureReduceLevels). A simulated 8 GB card at Boletaria 1-1: textures
 # 4.1 -> 2.8 GiB, 1% low 37-49 -> 53-58 fps; close surfaces a little softer.
 if ($TextureReduce -ne '') {
 	if ($TextureReduce -notin '0', '1', '2') { throw "-TextureReduce takes 0, 1 or 2, not '$TextureReduce'" }

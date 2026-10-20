@@ -1,4 +1,4 @@
-param([string]$Out = '', [string[]]$Set = @())
+param([string]$Out = '', [string[]]$Set = @(), [int]$StartupSeconds = 180)
 # Windows PGO refresh (tools/local/PGO.md): build an instrumented emulator in _Build\windows-pgogen,
 # play the training scene with it (the benchmark walk and standing, camera turns, on into the ruins,
 # strafing), write the profile with the live `pgo` command and merge it. Installing it as the release
@@ -11,14 +11,19 @@ if (!$Out) { $Out = "$root\_Build\pgo\windows\kyty-$(Get-Date -Format yyyyMMdd)"
 $env:KYTY_BUILD_DIR   = "$root\_Build\windows-pgogen"
 $env:KYTY_CMAKE_ARGS  = '-DKYTY_PGO_GENERATE=ON'
 cmd /c "$root\build-windows.cmd" | Select-String -Pattern ' error|FAILED' | Select-Object -Last 5
+$built = $LASTEXITCODE
 Remove-Item env:KYTY_BUILD_DIR, env:KYTY_CMAKE_ARGS
+if ($built -ne 0) { 'instrumented build failed: no training'; exit 1 }
 # bench-run finds the game by process name: the instrumented executable runs from its own directory.
 $exe = "$root\_Build\ab\pgogen"
 New-Item -ItemType Directory -Force $exe | Out-Null
 Copy-Item "$root\_Build\windows-pgogen\kyty_emulator.exe", "$root\_Build\windows-pgogen\libwinpthread-1.dll" $exe -Force
-$params = @{ Label = 'pgotrain'; Exe = "$exe\kyty_emulator.exe"; KeepRunning = $true; NoWalk = $true; ShotOnly = $true; StartupSeconds = 180 }
+# -StartupSeconds: each start-up attempt's limit (bench-run.ps1; an instrumented build loads slower).
+$params = @{ Label = 'pgotrain'; Exe = "$exe\kyty_emulator.exe"; KeepRunning = $true; NoWalk = $true; ShotOnly = $true; StartupSeconds = $StartupSeconds }
 if ($Set.Count) { $params['Set'] = $Set }
 & "$S\bench-run.ps1" @params | Select-Object -Last 1
+# No HUD (bench-run closed the game): a profile of menus would mislead the next build.
+if (!(Get-Process kyty_emulator -ErrorAction SilentlyContinue | Where-Object { $_.Threads.Count -gt 1 })) { 'emulator not running: no training'; exit 1 }
 function Plan([string]$plan) {
 	$walk = Start-Process powershell -ArgumentList '-NoProfile', '-File', "$S\keys.ps1", '-Plan', $plan -PassThru -WindowStyle Hidden
 	$walk.WaitForExit()
@@ -36,5 +41,9 @@ Start-Sleep 15
 $raw = "$Out.profraw" -replace '\\', '/'
 python tools\local\bench-windows.py live "pgo $raw" | Select-String 'LIVE_PGO|LIVE_ERROR'
 Get-Process kyty_emulator -ErrorAction SilentlyContinue | Where-Object { $_.Threads.Count -gt 1 } | Stop-Process -Force
-& 'C:\Program Files\LLVM\bin\llvm-profdata.exe' merge -o "$Out.profdata" "$Out.profraw"
+# The llvm-profdata of the compiler that built the instrumented executable (its profile format).
+$compiler = Select-String -Path "$root\_Build\windows-pgogen\CMakeCache.txt" -Pattern '^CMAKE_CXX_COMPILER:\w+=(.*)$' | Select-Object -First 1
+$profdata = if ($compiler) { Join-Path (Split-Path $compiler.Matches[0].Groups[1].Value) 'llvm-profdata.exe' } else { '' }
+if (!$profdata -or !(Test-Path $profdata)) { $profdata = 'C:\Program Files\LLVM\bin\llvm-profdata.exe' }
+& $profdata merge -o "$Out.profdata" "$Out.profraw"
 "profile: $Out.profdata"

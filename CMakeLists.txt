@@ -1008,6 +1008,13 @@ if((LINUX OR WIN32) AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 	endif()
 endif()
 
+if(WIN32)
+	# The render-thread profile's symbolizer (tools/local/windows/prof-spot.ps1): build-windows.cmd profreport.
+	add_executable(profreport EXCLUDE_FROM_ALL "${CMAKE_CURRENT_SOURCE_DIR}/tools/local/windows/profreport.cpp")
+	target_link_libraries(profreport dbghelp)
+	target_compile_definitions(profreport PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
 if(KYTY_BUILD_LAUNCHER)
 	add_subdirectory("${KYTY_SOURCE_DIR}/launcher" "${CMAKE_CURRENT_BINARY_DIR}/launcher")
 endif()
