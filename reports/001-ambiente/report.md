@@ -2,7 +2,7 @@
 
 **Status: PARCIAL.** Cobre instalação, build, testes, versão do jogo (PPSA01342 01.005.000), build de
 `fix/bench-save-region`, RAM e pré-compilação (seção "Complemento"). Ainda faltam a entrada no jogo e o save de
-benchmark, num commit seguinte, na mesma pasta.
+benchmark, num commit seguinte, na mesma pasta. **Bloqueado:** `run-windows.ps1` tem erro de sintaxe (ver "Problemas vistos").
 
 - Data/hora: 2026-10-19, 20:01–20:41 (horário local do PC)
 - Branch e commit testados: `fix/windows-test-build` `f225a627efe635f05ba6bc6d1e5dc7cd12ef915f`
@@ -139,7 +139,26 @@ O ambiente de build funciona: emulador e pré-compilador compilam com o toolchai
 
 ## Problemas vistos
 
-- Nenhum problema do projeto além dos testes acima.
+- **BLOQUEANTE: `run-windows.ps1` não roda (erro de sintaxe).** 2026-10-19 23:02, em `fix/bench-save-region`
+  `987dd7c`, `powershell -ExecutionPolicy Bypass -File .\run-windows.ps1 -Game F:\PPSA01342-app` sai em 0,4 s com
+  exit 1 (`run-first.log`):
+  ```
+  No F:\dev\KytyPS5\run-windows.ps1:370 caractere:19
+  + if ($FsrFrameGen) {
+  +                   ~
+  '}' de fechamento ausente no bloco de instrução ou na definição de tipo.
+      + FullyQualifiedErrorId : MissingEndCurlyBrace
+  ```
+  - `[System.Management.Automation.Language.Parser]::ParseFile` (Windows PowerShell 5.1; não há pwsh 7 aqui):
+    1 erro, linha 370. `launcher.ps1`, `precompile-windows.ps1` e `tools\local\windows\{bench-run,walk-run,prof-spot,ab-exe}.ps1`: 0 erros.
+  - Causa: o bloco `if ($FsrFrameGen) { ... }` perdeu a `}` final. Logo depois da linha
+    `if (!$environment.Contains('KYTY_VRAM_RESERVE_MB')) { ... }` vem direto o comentário de `-TextureReduce`.
+    No primeiro pai do merge `dc296347` (`git show dc296347^1:run-windows.ps1`, linhas 363–366) o bloco fecha com `}`;
+    o merge (que adicionou 13 linhas a esse arquivo) a perdeu. Está portanto em todo branch baseado na beta.2.
+  - Alcance: `launcher.ps1` e `tools\local\windows\bench-run.ps1` chamam `run-windows.ps1`, então também não
+    funcionam. Sem a correção não dá para entrar no jogo, criar o save de benchmark nem rodar o 002.
+  - Não alterei o arquivo. **Pedido ao agente da nuvem:** um branch `fix/*` com a `}` de volta (a partir de
+    `fix/bench-save-region`).
 - Erros meus, sem efeito nos resultados: a primeira chamada do build falhou na hora porque o `cmd` não achou
   `build-windows.cmd` pelo caminho relativo (corrigido com caminho absoluto). O log completo do primeiro build foi
   sobrescrito por engano; os tempos e códigos de saída daquela rodada foram anotados antes.
@@ -212,3 +231,4 @@ O ambiente de build funciona: emulador e pré-compilador compilam com o toolchai
 - `tm5.log`: log do TestMem5 (as duas rodadas interrompidas).
 - `precompile.log`: saída do `precompile-windows.ps1` (seeds, hints, progresso, mensagem final).
 - `precompile-plan-seeds.log`: planejamento das seeds, com os 5 programas rejeitados.
+- `run-first.log`: saída da tentativa de abrir o jogo (erro de sintaxe do `run-windows.ps1`).

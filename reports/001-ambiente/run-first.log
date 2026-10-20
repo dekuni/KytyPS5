@@ -1,0 +1,13 @@
+﻿powershell : No F:\dev\KytyPS5\run-windows.ps1:370 caractere:19
+No linha:1 caractere:328
++ ... inicio $t"; powershell -ExecutionPolicy Bypass -File F:\dev\KytyPS5\r ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (No F:\dev\KytyP...70 caractere:19:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
++ if ($FsrFrameGen) {
++                   ~
+'}' de fechamento ausente no bloco de instrução ou na definição de tipo.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : MissingEndCurlyBrace
+ 
