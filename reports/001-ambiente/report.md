@@ -240,22 +240,24 @@ dividido em `idle` = render thread ociosa esperando o jogo, `cpu` = CPU da rende
 compilação de pipeline, e esperas de GPU e transferência; ver `src/local/live-control.h:100-159`). Quadros entre 17 e
 100 ms não são registrados, então **não há fps médio nem 1% low desta sessão**: só as travadas.
 
-- 219 quadros acima de 100 ms (mediana 148 ms, p90 486 ms, pior 12.953 ms), somando 77,5 s travados em 25 min.
+- 313 quadros acima de 100 ms (mediana 131 ms, p90 402 ms, pior 12.953 ms), somando 89,7 s travados em 25 min.
+  (**Correção, 2026-10-20:** a primeira versão desta seção usou uma cópia do log feita 30 s antes de o emulador fechar,
+  895.720 de 933.115 bytes, e dizia 219 quadros, 77,5 s e "61%". Os números abaixo são do log completo.)
 - Causa dominante (≥ 50% do quadro):
 
   | Causa | Quadros | Tempo total | Pior |
   |---|---:|---:|---:|
   | compilação de pipeline (`compile`) | 75 | 47,3 s | 12.953 ms |
-  | render thread ociosa (`idle`, esperando o jogo) | 109 | 21,0 s | 1.648 ms |
-  | misto (nenhuma causa ≥ 50%) | 26 | 7,5 s | 3.680 ms |
+  | render thread ociosa (`idle`, esperando o jogo) | 199 | 32,2 s | 1.648 ms |
+  | misto (nenhuma causa ≥ 50%) | 30 | 8,4 s | 3.680 ms |
   | `readback_wait` / `download_wait` / `upload_wait` / `gpu_wait` | 9 | 1,7 s | 572 ms |
 
-- **A compilação de pipeline explica cerca de 61% do tempo travado** e todas as travadas longas: 12,9 s às 23:24:28,
-  7,1 s às 23:25:01 e 4,8 s às 23:14:02 (`compile` = 12.854, 7.050 e 3.952 ms). O emulador registrou 814 compilações
-  lentas: `AsyncCompute` 277 (mediana 308 ms, máx. 16.790 ms), `AsyncGraphics` 394 (185 / 860 ms), `CreateCompute` 81
+- **A compilação de pipeline explica cerca de 53% do tempo travado** (47,3 de 89,7 s) e todas as travadas longas: 12,9 s às 23:24:28,
+  7,1 s às 23:25:01 e 4,8 s às 23:14:02 (`compile` = 12.854, 7.050 e 3.952 ms). O emulador registrou 822 compilações
+  lentas: `AsyncCompute` 277 (mediana 308 ms, máx. 16.790 ms), `AsyncGraphics` 402 (187 / 860 ms), `CreateCompute` 81
   (305 / 4.385 ms) e `CreateGraphics` 62 (170 / 768 ms). São pipelines que não estavam no cache do driver.
   Como `KYTY_DRIVER_CACHE_KEY` é fixo, a próxima sessão deve reaproveitá-los. **Não medido** ainda.
-- Os 58 quadros do minuto 23:34 (11,9 s, quase todos `idle`) são o fechamento do jogo.
+- Os 152 quadros do minuto 23:34 (24,1 s, quase todos `idle`) são o fechamento do jogo.
 - **CPU (LibreHardwareMonitor, 1.521 amostras de 1 s):** Tctl médio 70,4 °C, máx. 78,9 °C (nenhuma amostra ≥ 85 °C),
   clock médio 4.429 MHz, carga média 26%, package médio 60 W. **A CPU não foi limitada por temperatura.**
 - **GPU:** carga média 70% (85–90% nos minutos de jogo), core médio 76,9 °C / máx. 85 °C, **hot spot médio 97,6 °C,
@@ -263,7 +265,7 @@ compilação de pipeline, e esperas de GPU e transferência; ver `src/local/live
   hot spot < 95 °C → clock médio 1.974 MHz (14 amostras); 100–105 °C → 1.749 MHz (746); ≥ 105 °C → 1.769 MHz (165),
   potência 138–139 W. Com isso não dá para separar queda de boost por temperatura de outras causas, mas a GPU passou
   quase todo o jogo a 100+ °C de hot spot e cerca de 200 MHz abaixo do clock que tinha fria.
-- **Memória de vídeo (8 GB):** 37 amostras do emulador; o uso passou do budget em 7 (máx. 8.250 MiB de 7.054 MiB às
+- **Memória de vídeo (8 GB):** 40 amostras do emulador; o uso passou do budget em 9 (máx. 8.250 MiB de 7.054 MiB às
   23:34:05, no fechamento). O tipo "plain" em VRAM chegou a 3.065 MiB (23:22–23:23). LHM: "GPU Memory Used" médio
   6.415 MiB, máx. 7.810 MiB. Placa no limite; não há linha de log que ligue isso a uma travada específica.
 

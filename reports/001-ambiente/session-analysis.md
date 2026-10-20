@@ -1,23 +1,23 @@
-frames SLOW: 219, com hora: 219
-primeiro 2026-10-19 23:10:29.680000  ultimo 2026-10-19 23:34:09.582000
-ms: min 100.2 mediana 147.8 p90 486.1 max 12952.5; soma 77.5 s
+frames SLOW: 313, com hora: 313
+primeiro 2026-10-19 23:10:29.680000  ultimo 2026-10-19 23:34:22.206000
+ms: min 100.2 mediana 130.7 p90 402.4 max 12952.5; soma 89.7 s
 
 ### Causa dominante (>= 50% do quadro)
 | Causa | Quadros | Tempo total (s) | Pior (ms) |
 |---|---:|---:|---:|
 | compile | 75 | 47.3 | 12952.5 |
-| ociosa (esperando o jogo) | 109 | 21.0 | 1647.6 |
-| misto/sem causa >50% | 26 | 7.5 | 3679.6 |
+| ociosa (esperando o jogo) | 199 | 32.2 | 1647.6 |
+| misto/sem causa >50% | 30 | 8.4 | 3679.6 |
 | readback_wait | 3 | 0.8 | 572.0 |
 | download_wait | 4 | 0.6 | 174.9 |
 | upload_wait | 1 | 0.2 | 249.5 |
 | gpu_wait | 1 | 0.1 | 134.5 |
 
-Soma de cada componente em todos os SLOW Frame (s): compile 43.9, readback_wait 1.4, gpu_wait 0.6, download_wait 0.7, upload_wait 1.0, record_wait 0.3, idle 19.5, cpu 48.9
+Soma de cada componente em todos os SLOW Frame (s): compile 43.9, readback_wait 1.5, gpu_wait 0.6, download_wait 0.7, upload_wait 1.2, record_wait 0.3, idle 28.8, cpu 51.3
 
 ### Compilações de pipeline lentas (SLOW *Pipeline)
 - AsyncCompute: 277, mediana 308 ms, max 16790 ms
-- AsyncGraphics: 394, mediana 185 ms, max 860 ms
+- AsyncGraphics: 402, mediana 187 ms, max 860 ms
 - CreateCompute: 81, mediana 305 ms, max 4385 ms
 - CreateGraphics: 62, mediana 170 ms, max 768 ms
 
@@ -62,7 +62,7 @@ Soma de cada componente em todos os SLOW Frame (s): compile 43.9, readback_wait 
 | 23:31 | 4 | 1.7 | compile | 75 | 75/79 | 4440 | 31 | 81 | 84 |
 | 23:32 | 6 | 1.2 | readback_wait | 5 | 69/75 | 4376 | 24 | 81 | 85 |
 | 23:33 | 4 | 2.2 | ociosa (esperando o jogo) | 1 | 75/77 | 4524 | 39 | 82 | 79 |
-| 23:34 | 58 | 11.9 | ociosa (esperando o jogo) | 1 | 74/79 | 4426 | 27 | 69 | 62 |
+| 23:34 | 152 | 24.1 | ociosa (esperando o jogo) | 9 | 74/79 | 4426 | 27 | 69 | 62 |
 
 ### Memoria de video (amostras do emulador)
 | Hora (aprox.) | flip | Em uso MiB | Budget MiB | Tipo "plain" na VRAM MiB | Memoria de sistema da GPU MiB |
@@ -104,8 +104,11 @@ Soma de cada componente em todos os SLOW Frame (s): compile 43.9, readback_wait 
 | 23:32:53 | 56280 | 6813 | 7086 | 1939 | 1800 |
 | 23:33:54 | 58500 | 7939 | 7028 | 1939 | 1546 |
 | 23:34:05 | 58560 | 8250 | 7054 | 2124 | 1546 |
+| 23:34:21 | 58680 | 7859 | 7016 | 2009 | 1418 |
+| 23:34:22 | 58740 | 7291 | 7020 | 1939 | 1482 |
+| 23:34:22 | 58920 | 6992 | 7077 | 2003 | 1736 |
 
-acima do budget: 7 de 37
+acima do budget: 9 de 40
 
 ### Prefetch
 2026-10-19 23:11:16.207000 Shader prefetch: all 20374 programs done, 0 from the translation store (0 rejected), 5001 MiB of SPIR-V translated (5054 MiB in the scratch file)

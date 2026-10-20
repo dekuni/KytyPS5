@@ -46,10 +46,16 @@ Demon's Souls a **30+ fps estáveis** (inclusive o 1% low) no PC abaixo, depois 
 | `fix/windows-test-build` | `f225a62` | `kyty_tests` compila e linka no Windows (só testes/CMake) |
 | `fix/bench-save-region` | `987dd7c` | + `tools/local/bench-windows.py` troca o save de PPSA01340/01341/01342 (antes só 01341: o benchmark rodaria no save real do usuário) |
 | **`fix/run-windows-brace`** | **`91f388c`** | + `}` que faltava no bloco `-FsrFrameGen` do `run-windows.ps1` (bug da beta.2: o script não abria) |
+| `fix/1080p-other-builds` | `445022a` | saídas 1080p em builds que não são PPSA01341 1.07 (1080f = 4K com 3D a 1080 linhas; 1080q = 4K) + localizador de patch sem âncora de enchimento + teste no ctest |
+| `fix/bench-tools-1.05` | `dcdd138` | `bench-windows.py` exige o save do título do jogo e `reset` usa o baseline do `prepare`; `bench-run` fecha o jogo sem HUD; `profreport` é alvo CMake; `-StartupSeconds` repassado |
+| `fix/vram-fallback-log` | `0d7b891` | log "video memory full" continua depois da 8ª vez e descreve a imagem |
+| `fix/name-compile-threads` | `884c2ba` | nomes nas threads de compilação (`Kyty.Compile`, `Kyty.TableCompile`, `Kyty.Optimize`) |
+| `test/integration` (só local) | `87b625a` | os quatro acima mesclados sobre `fix/run-windows-brace`: o exe para jogar e medir (`ctest` 41/65, mesmas 24 falhas da base) |
 | `reports` | — | relatórios em `reports/NNN-<rótulo>/` e este arquivo em `handoff/` |
 | `claude/push-test` | `dc29634` | branch de teste, sem conteúdo. O usuário pode apagá-lo no site |
 
-**Base de todo trabalho novo: `fix/run-windows-brace`.** Commits em Conventional Commits (`fix(...)`, `perf(...)`).
+**Base de todo trabalho novo: `fix/run-windows-brace`.** Para jogar e medir, use um exe com as correções acima
+(`test/integration`, ou refaça a mescla dos `fix/*`). Relatório das correções: `reports/002-correcoes-codigo/`. Commits em Conventional Commits (`fix(...)`, `perf(...)`).
 Um branch por mudança: `fix/<nome>` ou `perf/<nome>`. Push no fork.
 
 ## 6. Estado medido (relatório `reports/001-ambiente/`)
@@ -57,13 +63,16 @@ Um branch por mudança: `fix/<nome>` ou `perf/<nome>`. Push no fork.
   são a linha de base (lista no report.md). Falha NOVA em um branch = regressão. O CI do projeto não roda testes.
 - Pré-compilação: 58 min 55 s, `_PipelineCache\static\PPSA01342_01.005.000.binaries` (45.735 pipelines, 3.831 MiB).
   Hints da PPSA01341 1.05 usados e 100% compatíveis. 5 programas rejeitados no planejamento.
-- **Primeira sessão** (25 min, tutorial até o primeiro boss, sem crash): 219 quadros >100 ms, 77,5 s travados; **61% por
-  compilação de pipeline** (814 linhas `SLOW *Pipeline`; pior quadro 12,9 s). Warmup gravado neste PC começou vazio (normal
-  na 1ª vez); cache do driver começou vazio e salvou 31 MB. Log: `reports/001-ambiente/session-emulator.out.log.gz`;
+- **Primeira sessão** (25 min, tutorial até o primeiro boss, sem crash): 313 quadros >100 ms, 89,7 s travados; **53% por
+  compilação de pipeline** (47,3 s; 822 linhas `SLOW *Pipeline`, das quais as 143 `SLOW Create*` síncronas travam o quadro;
+  pior quadro 12,9 s). Os 152 quadros do minuto 23:34 são o fechamento do jogo. (Corrigido em 2026-10-20: a 1ª análise
+  usou um log copiado 30 s antes do fim e dizia 219 / 77,5 s / 61%.) Ao fechar, o emulador salvou o warmup
+  (`Shader warmup: saved 3162 inputs and 3064 pipelines`, 14 MB em `_PipelineCache\warmup-v2`) e os caches do driver
+  (`local\<key>\PPSA01342.bin` 36,6 MB e `.table.bin` 31,9 MB): a 2ª sessão deve carregá-los. Log: `reports/001-ambiente/session-emulator.out.log.gz`;
   análise: `session-analysis.md` e `session_analysis.py`.
 - **GPU quente**: hot spot médio 97,6 °C, máx 108 °C; diferença hot spot–núcleo 20–30 °C (pasta/pads ou poeira); clock cai de
   ~1.970 para ~1.750 MHz (~11%). Problema de hardware: limpar, curva de ventoinha, talvez trocar pasta. Recomendado ao usuário.
-- **VRAM no limite**: 7,0–8,2 GB usados para 7,1 GB de budget (acima do budget em 7 de 37 amostras).
+- **VRAM no limite**: 7,0–8,2 GB usados para 7,1 GB de budget (acima do budget em 9 de 40 amostras).
 - Ainda **não há nenhuma medição de fps** (o log só registra quadros >100 ms).
 
 ## 7. Análise do código feita pelos agentes (íntegra em `handoff/analise-agentes.md`)
@@ -79,28 +88,34 @@ Um branch por mudança: `fix/<nome>` ou `perf/<nome>`. Push no fork.
 | shaders | async-compute-table-fast-build: compilação rápida (sem otimizar) também nos pipelines compute assíncronos de tabela | medir antes |
 | shaders | covered-by-local-only; native-variants-recorded-tier; foreground-first-driver-compiles | medir antes |
 | shaders | table-forms-of-guesses | errada (descartar) |
-| Ryzen | uniform-cpu-auto-placement: em CPU sem P/E-cores, `auto` = threads de render/gravação/upload em todos os CPUs menos o núcleo do CPU 0 | sem verificação |
-| Ryzen | avoid-list-floor; background-compile-switches; pgo-local-training (o `pgo-train.ps1` pode ter PPSA01341 fixo) | sem verificação |
-| VRAM | vram-collector-line; texture-reduce-auto; collector-os-usage; residency-priorities; free-replaced-pipelines | sem verificação |
+| Ryzen | uniform-cpu-auto-placement: em CPU sem P/E-cores, `auto` = threads de render/gravação/upload em todos os CPUs menos o núcleo do CPU 0 | verificado 2026-10-20: medir antes (passo 8; ganho do guia era de Intel híbrido com HT off) |
+| Ryzen | avoid-list-floor (desnecessária); background-compile-switches (medir antes); pgo-local-training (fazer: `pgo-train.ps1` não depende de 1.07) | verificado 2026-10-20 (relatório 002) |
+| VRAM | free-replaced-pipelines e collector-os-usage: erradas; texture-reduce-auto e residency-priorities: medir antes; contador de falhas: implementado (`fix/vram-fallback-log`) | verificado 2026-10-20 (relatório 002) |
 
 ## 8. Plano, em ordem
 1. **Hardware (usuário):** resfriamento da GPU. Registrar antes/depois (hot spot e clock) se mexer.
 2. **Diagnóstico de shaders:** 2ª sessão, mesma rota do tutorial, com
-   `powershell -ExecutionPolicy Bypass -File .\run-windows.ps1 -Game F:\PPSA01342-app -Set KYTY_PIPELINE_SOURCE_LOG=1`.
+   `powershell -ExecutionPolicy Bypass -File .\run-windows.ps1 -Game F:\PPSA01342-app -Set KYTY_PIPELINE_SOURCE_LOG=1,KYTY_PIPELINE_KEY_LOG=1,KYTY_FPS_HUD=2`
+   com o exe do `test/integration` (dry-run conferido). O save já passou do tutorial: a rota é dele até Boletaria 1-1.
+   Analisar com `reports/001-ambiente/session_analysis.py` (tem seção PIPESRC), com o log copiado depois de o emulador fechar.
    Comparar com a 1ª: número de `SLOW *Pipeline`, e contar linhas `PIPESRC ... static=0` vs `static=1` (código em
    `src/graphics/host_gpu/renderer/pipeline/shaders.cpp`, `PipelineSourceLog`). Se as travadas sumirem, era só a 1ª execução.
    Se muitas vierem `static=0`, implementar as propostas de shaders do §7 (uma por branch, A/B).
-3. **Implementar `fix-1080p-other-builds`** (aprovada). Testar "1080p Performance" e "1080p Quality" na 1.05: o jogo abre?
+2b. **FEITO 2026-10-20 (relatório 003):** sessão 2 mostrou 104 compilações na render thread (53,8 s) de pipelines que a pré-compilação padrão pula (`--covered-by`). Próximo: `precompile-windows.ps1 -Full` (e daí em diante sempre `-Full`, senão a poda os remove).
+3. **`fix-1080p-other-builds`: IMPLEMENTADO** (branch acima; dry-run e teste unitário ok). Falta no jogo: Testar "1080p Performance" e "1080p Quality" na 1.05: o jogo abre?
    HUD no lugar? Screenshot. Medir fps contra a saída 4K (a 3060 Ti deve ganhar: ~44% menos pixels).
 4. **Save de benchmark** em Boletaria 1-1 (ponto onde andar 10 s sai do túnel para as ruínas). `KYTY_BENCH_BASELINE=F:\dev\bench-save`;
    `python tools\local\bench-windows.py prepare` antes e `restore` depois (tem que dizer "verified").
-5. **Relatório 002-base:** `tools\local\windows\bench-run.ps1 -Label base` e `walk-run.ps1 -Label base`.
-6. **003-perfil:** `tools\local\windows\prof-spot.ps1 -Label base -Seconds 8 -Top 80` (o `prof.txt` diz onde a thread de render gasta).
-7. **004-cpu-vs-gpu:** mesma cena variando Output e Graphics detail ("Standard" vs "Fewer shadows").
-8. **005-afinidade Ryzen:** `tools\local\windows\ab-exe.ps1` com o mesmo exe, `-SetB KYTY_RENDER_CPUS=2-15`. Se ganhar,
+5. **Relatório 004-base** (002: correções de código; 003: sessão 2): `tools\local\windows\bench-run.ps1 -Label base` e `walk-run.ps1 -Label base`.
+6. **005-perfil:** `tools\local\windows\prof-spot.ps1 -Label base -Seconds 8 -Top 80` (o `prof.txt` diz onde a thread de render gasta).
+7. **006-cpu-vs-gpu:** (os convars de `-Quality` existem no eboot 1.05: conferido) mesma cena variando Output e Graphics detail ("Standard" vs "Fewer shadows").
+8. **007-afinidade Ryzen:** `tools\local\windows\ab-exe.ps1` com o mesmo exe,
+   `-SetB 'KYTY_RECORDING_CPUS=2-15,KYTY_RENDER_CPUS=2-15,KYTY_BACKGROUND_CPUS=0-15'` (as duas primeiras juntas: o
+   `run-windows.ps1` copia RECORDING para RENDER antes do `-Set`; sem a terceira o teste fica confundido). Se ganhar,
    verificar e implementar `uniform-cpu-auto-placement` (§7) em `run-windows.ps1` (`Get-PerformanceCpus`) e no launcher.
    O guia diz: render nunca no CPU 0 (no Intel deu +2,5%), nunca sozinha num núcleo (piorou as quedas).
-9. **PGO local** (o perfil do repositório foi treinado num Intel; retreinar deu +3% ao autor): `tools\local\windows\pgo-train.ps1`,
+9. **PGO local** (conferido: o perfil do repositório não casa 4.235 funções em namespace anônimo deste build, porque o
+   nome leva um hash do caminho do arquivo; 5,6% das chamadas do perfil, incluindo funções quentes) (o perfil do repositório foi treinado num Intel; retreinar deu +3% ao autor): `tools\local\windows\pgo-train.ps1`,
    `tools\local\PGO.md`. Conferir antes se ele aceita PPSA01342.
 10. **VRAM:** verificar as propostas do §7 no código; testar `run.cmd`/`run-windows.ps1 -TextureReduce 2` contra o padrão.
 11. **Iluminação 1.05** (`lighting-rule-105`): só depois, precisa dos hashes dos shaders da 1.05 e refazer a pré-compilação.

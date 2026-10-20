@@ -1,0 +1,34 @@
+########## bench-windows.py old (raiz falsa com _SaveData/PPSA01342 = 'real-user-save'; jogo PPSA01342)
+-- 1) KYTY_BENCH_BASELINE=base-wrong (so PPSA01341) prepare:
+user save moved to C:\Users\<user>\AppData\Local\Temp\claude\C--Users-<user>-OneDrive-Desktop\c306f476-85f9-4380-bc46-4a6fedd8a838\scratchpad\benchtest2\old\_Build\windows-bench\user-save-20261020-061429; baseline save installed
+exit=0
+   _SaveData agora: PPSA01341 
+   (instalado: restore)
+user save restored and verified (1 files)
+-- 2) KYTY_BENCH_BASELINE=base-right prepare:
+user save moved to C:\Users\<user>\AppData\Local\Temp\claude\C--Users-<user>-OneDrive-Desktop\c306f476-85f9-4380-bc46-4a6fedd8a838\scratchpad\benchtest2\old\_Build\windows-bench\user-save-20261020-061433; baseline save installed
+exit=0
+-- 3) reset sem KYTY_BENCH_BASELINE:
+baseline save reinstalled
+exit=0
+   save PPSA01342 instalado: NENHUM
+-- 4) restore:
+user save restored and verified (1 files)
+exit=0
+   save do usuario: real-user-save
+########## bench-windows.py new (raiz falsa com _SaveData/PPSA01342 = 'real-user-save'; jogo PPSA01342)
+-- 1) KYTY_BENCH_BASELINE=base-wrong (so PPSA01341) prepare:
+C:\Users\<user>\AppData\Local\Temp\claude\C--Users-<user>-OneDrive-Desktop\c306f476-85f9-4380-bc46-4a6fedd8a838\scratchpad\benchtest2\new\base-wrong has no save folder of PPSA01342 (the game in game-path.txt is PPSA01342)
+exit=1
+   _SaveData agora: PPSA01342 
+-- 2) KYTY_BENCH_BASELINE=base-right prepare:
+user save moved to C:\Users\<user>\AppData\Local\Temp\claude\C--Users-<user>-OneDrive-Desktop\c306f476-85f9-4380-bc46-4a6fedd8a838\scratchpad\benchtest2\new\_Build\windows-bench\user-save-20261020-061434; baseline save installed from C:\Users\<user>\AppData\Local\Temp\claude\C--Users-<user>-OneDrive-Desktop\c306f476-85f9-4380-bc46-4a6fedd8a838\scratchpad\benchtest2\new\base-right (PPSA01342)
+exit=0
+-- 3) reset sem KYTY_BENCH_BASELINE:
+baseline save reinstalled (PPSA01342 from C:\Users\<user>\AppData\Local\Temp\claude\C--Users-<user>-OneDrive-Desktop\c306f476-85f9-4380-bc46-4a6fedd8a838\scratchpad\benchtest2\new\base-right)
+exit=0
+   save PPSA01342 instalado: bench
+-- 4) restore:
+user save restored and verified (1 files)
+exit=0
+   save do usuario: real-user-save

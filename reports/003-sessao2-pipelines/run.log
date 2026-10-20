@@ -1,0 +1,8 @@
+﻿game:     Demon's Souls, PPSA01342 01.005.000 (untested: the emulator is tested with PPSA01341 01.007.000 and PPSA01341 01.005.000)
+config:   F:\dev\KytyPS5\run-windows.json
+affinity: 0xFFFF (16 CPUs)
+switches: 60
+command:  F:\dev\KytyPS5\_Build\windows\kyty_emulator.exe --game "F:\PPSA01342-app" --screen-width 2560 --screen-height 1440 --console-language 1 --shader-validation false --shader-log-direction Silent --printf-direction Silent --vblank-frequency 60 --present-mode Immediate --redzone
+shaders:  listing the game's shaders from its files again (another precompile program)
+shaders:  prefetch inputs ready, static pipeline cache ready
+pid 36092; logs: _Build\run-logs\20261020-103014-142.*.log

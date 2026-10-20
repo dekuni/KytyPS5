@@ -1,0 +1,86 @@
+### 61ae1a2f4bb7815ee7b5aa290f0a44cf188bbb12
+fix(output): 1080p outputs on builds other than PPSA01341 1.07
+
+The 1080p HUD patches (patches/1080p-*.json) are PPSA01341 01.007.000's, but run-windows.ps1 and the launcher
+passed them, with the game's 1080p tier, to every Demon's Souls region and version. On PPSA01342 (any other
+title) ValidateGame refuses the file and the emulator stops at boot ("Failed to apply game cheat"); on another
+version the HUD patch is not found and the 1080p tier lays the HUD out off screen.
+
+- run-windows.ps1 -Output and the launcher's LaunchPlan read the patch file's id and version: only on that build
+  the 1080p tier and patch are used. On any other build 1080f renders the 3D at 1080 lines with the 4K output
+  (KYTY_RENDER_HEIGHT=1080, unless -RenderHeight is given) and 1080q is the 4K output; an "output:" line says
+  why. A -Patch given by hand keeps the old behaviour.
+- gamePatchLocate.h: when a cheat is searched for (not at its own offset), writes whose original bytes are one
+  repeated padding value (0x00, 0xCC, 0x90) no longer count toward the 8 searched bytes nor anchor the search.
+  The 1.07 HUD mod (a 9-byte 0xCC cave plus three 1-byte edits) could otherwise be placed at any int3 run of
+  another build. It is now TooShort there; at its own offset it applies as before.
+- The launcher's 1080p warnings say what the other builds get instead.
+- Tests: GamePatchLocateTests covers a padding-anchored cheat (fails on the old header) and a moved cheat with a
+  padding cave; the Demon's Souls title test expects PPSA01342 supported (demonsSouls.h supports it).
+- README and PORTABLE-README: what the 1080p modes do on other builds.
+
+Checked on Windows: run-windows.ps1 parses; -DryRun on PPSA01342 01.005.000 gives no --game-patch and no
+KYTY_RENDER_CONVARS, KYTY_RENDER_HEIGHT=1080 for 1080f (1296 with -RenderHeight 1296); on a PPSA01341 01.007.000
+param.json the patch and convars are passed as before. The Qt launcher was not compiled (no Qt on this PC).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### 445022aa6882144a6f2e0a6f398e1b11fd64ff8f
+test(loader): run GamePatchLocateTests in ctest
+
+game_patch_locate_tests was built by its own target only: no add_test and not in kyty_tests, so ctest never ran
+it. Registered as game_patch_locate.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### dcdd138ee1993801ee1e9ed2799ff3981d2f9749
+fix(tools): benchmark tooling on other regions and a missing HUD
+
+Measuring on PPSA01342 01.005.000 (Windows, Ryzen 7 5700X + RTX 3060 Ti) needed these:
+
+- bench-windows.py prepare required a save folder of any Demon's Souls region, and reset reinstalled whatever
+  KYTY_BENCH_BASELINE named in its own shell, printing "reinstalled" even when nothing was. A baseline of another
+  region, or a shell without the variable, left the game without a save: it started a new game and every run
+  ended with "no HUD" after minutes. prepare now requires the folder of the game in game-path.txt and records the
+  baseline; reset reinstalls that one and fails when the game's folder did not come back.
+- bench-run.ps1 exited on "no HUD in N start-ups" with the emulator still running, and prof-spot, ab-spot, ab-exe
+  and walk-run went on to profile, measure or walk on a menu (pgo-train trained on it). It now closes the game
+  first; pgo-train also stops when the instrumented build or the start-up fails, and merges with the
+  llvm-profdata of the compiler that built it.
+- prof-spot.ps1 ran _Build\windows-tools\profreport.exe, which nothing built: profreport is now a CMake target
+  (build-windows.cmd profreport), built by prof-spot before the game starts when missing.
+- walk-run, ab-spot and prof-spot pass -StartupSeconds to bench-run (ab-exe and pgo-train did).
+- run-windows.ps1: -TextureReduce's help said "default 1 below 12 GB"; the default is 0 on every card
+  (descriptors.cpp TextureReduceLevels).
+
+Checked: the scripts parse (Windows PowerShell 5.1); bench-windows.py prepare/reset/restore in a scratch root with a
+PPSA01342 game: a PPSA01341-only baseline is refused (the old script installed it and moved the user's save
+aside), reset without KYTY_BENCH_BASELINE reinstalls the prepared baseline, restore verifies; profreport builds
+with no warnings.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### 0d7b891136ec5a71febd07842d74fe8c06c48f93
+fix(vma): keep counting video memory fallbacks after the first 8
+
+On an 8 GB RTX 3060 Ti (PPSA01342 1.05, tutorial boss) the log showed eight "Vulkan: video memory full" lines in
+one frame, then nothing, while a 3.7 s frame and ~20 s at about 7 fps followed: whether device-local allocations
+kept failing, and which image kept being re-created (36,044,800 to 40,632,320 bytes in 640 KiB steps), was not
+in the log.
+
+After the first 8, ReportMemoryFallback now prints at most one line a second with the running count and total
+("video memory full xN (M MiB in all), last: ...") and the heaps. An image that falls back to system memory is
+named by its extent, layers, levels, format and usage. Log output only: no allocation, placement or shader changes.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### 884c2ba34d371e0f4392146dda1998d0dadac25a
+fix(pipeline): name the compile worker threads
+
+The three pools that create pipelines off the render thread (normal, table and optimize compiles: up to 4, 8 and
+4 threads on a 16-thread CPU) had no thread name, so tools\local\windows\threads.ps1 and profilers could not tell
+their CPU time from the game's. They are now Kyty.Compile, Kyty.TableCompile and Kyty.Optimize. Names only: no
+change to how many there are, their priority, placement or what they compile.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+

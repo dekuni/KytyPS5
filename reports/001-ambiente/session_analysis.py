@@ -1,9 +1,14 @@
-"""First-session analysis: slow frames by cause and minute, VRAM, LHM temperatures. Prints Markdown."""
+"""Session analysis: slow frames by cause and minute, pipeline sources (KYTY_PIPELINE_SOURCE_LOG), VRAM, LHM
+temperatures. Prints Markdown.
+
+  python -I -X utf8 session_analysis.py <emulator .out.log, copied after the emulator exited> <LHM csv folder>
+                                        [<session start YYYY-mm-ddTHH:MM:SS> <session end>]
+Without start and end, the session is the first to the last SLOW Frame."""
 import csv, datetime as dt, glob, os, re, statistics as st, sys
 
 LOG, LHM_DIR = sys.argv[1], sys.argv[2]
-T0 = dt.datetime(2026, 10, 19, 23, 9, 17)
-T1 = dt.datetime(2026, 10, 19, 23, 34, 39)
+T0 = dt.datetime.fromisoformat(sys.argv[3]) if len(sys.argv) > 4 else None
+T1 = dt.datetime.fromisoformat(sys.argv[4]) if len(sys.argv) > 4 else None
 
 lines = open(LOG, encoding='utf-8', errors='replace').read().splitlines()
 
@@ -12,6 +17,8 @@ frames = []
 last_time = None
 pipes = []          # (time, kind, ms)
 vram = []           # (time or None, used, budget, plain, sysmem)
+pipesrc = []        # (time, kind, static, build, unoptimized, ms, blob)
+progsrc = []        # (time, label, translated, ms)
 prefetch_done = None
 for idx, l in enumerate(lines):
     m = re.search(r'SLOW Frame ([\d.]+) ms (.*)', l)
@@ -32,6 +39,15 @@ for idx, l in enumerate(lines):
     if m:
         vram.append((last_time, int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5))))
         continue
+    m = re.search(r'PIPESRC (\S+) key=\w+ static=(\d) build=(\d) unoptimized=(\d) ms=([\d.]+) blob=(\d+)', l)
+    if m:
+        pipesrc.append((last_time, m.group(1), int(m.group(2)), int(m.group(3)), int(m.group(4)), float(m.group(5)),
+                        int(m.group(6))))
+        continue
+    m = re.search(r'PROGSRC (\S+) hash=\w+ translated=(\d) translate_ms=[\d.]+ ms=([\d.]+)', l)
+    if m:
+        progsrc.append((last_time, m.group(1), int(m.group(2)), float(m.group(3))))
+        continue
     if l.startswith('Shader prefetch: all') and prefetch_done is None:
         prefetch_done = (last_time, l)
 
@@ -46,6 +62,9 @@ def cause(f):
     return 'misto/sem causa >50%'
 
 
+if T0 is None:
+    timed = [f['t'] for f in frames if 't' in f]
+    T0, T1 = (min(timed), max(timed)) if timed else (dt.datetime.min, dt.datetime.max)
 print(f"frames SLOW: {len(frames)}, com hora: {sum('t' in f for f in frames)}")
 print(f"primeiro {min(f['t'] for f in frames if 't' in f)}  ultimo {max(f['t'] for f in frames if 't' in f)}")
 ms = sorted(f['ms'] for f in frames)
@@ -68,6 +87,27 @@ for _, k, v in pipes:
     kinds.setdefault(k, []).append(v)
 for k, v in sorted(kinds.items()):
     print(f'- {k}: {len(v)}, mediana {st.median(v):.0f} ms, max {max(v):.0f} ms')
+
+print('\n### Origem dos pipelines (PIPESRC: KYTY_PIPELINE_SOURCE_LOG=1)')
+if not pipesrc:
+    print('sem linhas PIPESRC (switch desligado nesta sessão)')
+else:
+    print('| Tipo | static=1 (pré-compilação) | static=0 | static=0 >= 100 ms | ms somados static=0 | com blob |')
+    print('|---|---:|---:|---:|---:|---:|')
+    for kind in sorted({p[1] for p in pipesrc}):
+        ks = [p for p in pipesrc if p[1] == kind]
+        hit = [p for p in ks if p[2] == 1]
+        miss = [p for p in ks if p[2] == 0]
+        print(f"| {kind} | {len(hit)} | {len(miss)} | {sum(1 for p in miss if p[5] >= 100)} | "
+              f"{sum(p[5] for p in miss):.0f} | {sum(1 for p in ks if p[6] > 0)} |")
+    builds = {}
+    for p in pipesrc:
+        builds[(p[3], p[4])] = builds.get((p[3], p[4]), 0) + 1
+    print('\nbuild (0 full, 1 fast, 2 optimize), unoptimized: ' + ', '.join(f'{b}/{u}: {n}' for (b, u), n in sorted(builds.items())))
+    if progsrc:
+        tr = [p for p in progsrc if p[2] == 1]
+        print(f'PROGSRC: {len(progsrc)} permutações, {len(tr)} traduzidas na hora ({sum(p[3] for p in tr):.0f} ms), '
+              f'{len(progsrc) - len(tr)} adotadas do prefetch')
 
 # --- LHM ---
 ids = {'tctl': '/amdcpu/0/temperature/2', 'clk': '/amdcpu/0/clock/1', 'cpuload': '/amdcpu/0/load/0',
@@ -104,8 +144,11 @@ def agg(xs, k):
     return (st.mean(v), max(v)) if v else (float('nan'), float('nan'))
 
 
-print(f'\n### LHM na sessao: {len(sess)} amostras de {sess[0]["t"]:%H:%M:%S} a {sess[-1]["t"]:%H:%M:%S}')
-for k in ids:
+if sess:
+    print(f'\n### LHM na sessao: {len(sess)} amostras de {sess[0]["t"]:%H:%M:%S} a {sess[-1]["t"]:%H:%M:%S}')
+else:
+    print('\n### LHM na sessao: nenhuma amostra (LibreHardwareMonitor sem Log Sensors): temperaturas nao medidas')
+for k in ids if sess else []:
     a, b = agg(sess, k)
     print(f'- {k}: media {a:.1f}, max {b:.1f}')
 try:

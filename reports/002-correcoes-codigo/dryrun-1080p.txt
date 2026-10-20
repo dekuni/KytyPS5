@@ -1,0 +1,17 @@
+﻿===== run-windows.ps1 -Game F:\PPSA01342-app -DryRun 
+game:     Demon's Souls, PPSA01342 01.005.000 (untested: the emulator is tested with PPSA01341 01.007.000 and PPSA01341 01.005.000)
+  --game-patch na linha de comando: False
+===== run-windows.ps1 -Game F:\PPSA01342-app -DryRun -Output 1080f
+game:     Demon's Souls, PPSA01342 01.005.000 (untested: the emulator is tested with PPSA01341 01.007.000 and PPSA01341 01.005.000)
+output:   1080f's HUD patch is for PPSA01341 01.007.000, the game is PPSA01342 01.005.000: 4K output, 3D at 1080 lines (-RenderHeight 1080)
+  KYTY_RENDER_HEIGHT=1080
+  --game-patch na linha de comando: False
+===== run-windows.ps1 -Game F:\PPSA01342-app -DryRun -Output 1080q
+game:     Demon's Souls, PPSA01342 01.005.000 (untested: the emulator is tested with PPSA01341 01.007.000 and PPSA01341 01.005.000)
+output:   1080q's HUD patch is for PPSA01341 01.007.000, the game is PPSA01342 01.005.000: 4K output (the same 1440p scene)
+  --game-patch na linha de comando: False
+===== run-windows.ps1 -Game F:\PPSA01342-app -DryRun -Output 1080f -RenderHeight 1296
+game:     Demon's Souls, PPSA01342 01.005.000 (untested: the emulator is tested with PPSA01341 01.007.000 and PPSA01341 01.005.000)
+output:   1080f's HUD patch is for PPSA01341 01.007.000, the game is PPSA01342 01.005.000: 4K output, 3D at 1296 lines (-RenderHeight)
+  KYTY_RENDER_HEIGHT=1296
+  --game-patch na linha de comando: False
